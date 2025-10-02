@@ -92,11 +92,22 @@ def resolve_data_science_config(source: PipelineConfigSource) -> ResolvedPipelin
     return resolve_config_source(source, config_cls=DataScienceConfig)
 
 
+def _clone_with_model(agent: Agent, config: LLMConfig) -> Agent:  # type: ignore[override]
+    """Return a copy of the agent bound to the current pipeline model."""
+
+    cloned = agent.clone() if hasattr(agent, "clone") else agent
+    if getattr(cloned, "model", None) is None:
+        cloned.model = config.main_model  # type: ignore[attr-defined]
+    return cloned
+
+
 def instantiate_agent_spec(spec: AgentFactory, config: LLMConfig) -> Agent:
     """Instantiate a manager agent from the provided specification."""
 
     if callable(spec):  # type: ignore[arg-type]
         return spec(config)  # type: ignore[misc]
+    if isinstance(spec, Agent):  # type: ignore[arg-type]
+        return _clone_with_model(spec, config)
     return spec  # type: ignore[return-value]
 
 
