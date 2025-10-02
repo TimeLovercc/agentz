@@ -91,7 +91,8 @@ class DataScientistPipeline(BasePipeline):
         trace_include_sensitive_data: bool = False,
         workflow_name: Optional[str] = None,
         config_dict: Optional[dict] = None,
-        llm_config: Optional[LLMConfig] = None
+        llm_config: Optional[LLMConfig] = None,
+        config_file: Optional[str] = None
     ):
         """
         Initialize the DataScientistPipeline.
@@ -108,6 +109,7 @@ class DataScientistPipeline(BasePipeline):
             workflow_name: Custom workflow name for tracing
             config_dict: Pre-built config dictionary (alternative to individual params)
             llm_config: Pre-created LLM configuration (alternative to config_dict)
+            config_file: Path to config file (YAML/JSON) - loads all settings from file
         """
         # Initialize base class (handles env loading, config creation)
         super().__init__(
@@ -120,19 +122,26 @@ class DataScientistPipeline(BasePipeline):
             enable_tracing=enable_tracing,
             trace_include_sensitive_data=trace_include_sensitive_data,
             config_dict=config_dict,
-            llm_config=llm_config
+            llm_config=llm_config,
+            config_file=config_file
         )
 
         self.experiment_id = get_experiment_timestamp()
         self.workflow_name = workflow_name or f"data_science_pipeline_{self.experiment_id}"
 
-        # Initialize data researcher with tracing configuration
+        # Get pipeline settings from config file if available
+        pipeline_settings = {}
+        if self.full_config:
+            pipeline_settings = self.full_config.get('pipeline', {})
+
+        # Initialize data researcher with tracing configuration and config settings
         self.researcher = DataScientist(
-            max_iterations=5,
-            max_time_minutes=10,
-            verbose=True,
+            max_iterations=pipeline_settings.get('max_iterations', 5),
+            max_time_minutes=pipeline_settings.get('max_time_minutes', 10),
+            verbose=pipeline_settings.get('verbose', True),
             tracing=enable_tracing,
             config=self.config,
+            full_config=self.full_config,
             trace_include_sensitive_data=trace_include_sensitive_data,
             workflow_name=f"researcher_{self.experiment_id}"
         )
@@ -287,6 +296,7 @@ class DataScientist:
         verbose: bool = True,
         tracing: bool = False,
         config: Optional[LLMConfig] = None,
+        full_config: Optional[dict] = None,
         trace_include_sensitive_data: bool = False,
         workflow_name: Optional[str] = None
     ):
@@ -301,12 +311,13 @@ class DataScientist:
         self.trace_include_sensitive_data = trace_include_sensitive_data
         self.workflow_name = workflow_name or "data_researcher_workflow"
         self.config = config
+        self.full_config = full_config
 
-        self.evaluate_agent = create_evaluate_agent(self.config)
-        self.routing_agent = create_routing_agent(self.config)
-        self.observe_agent = create_observe_agent(self.config)
-        self.writer_agent = create_writer_agent(self.config)
-        self.tool_agents = init_tool_agents(self.config)
+        self.evaluate_agent = create_evaluate_agent(self.config, self.full_config)
+        self.routing_agent = create_routing_agent(self.config, self.full_config)
+        self.observe_agent = create_observe_agent(self.config, self.full_config)
+        self.writer_agent = create_writer_agent(self.config, self.full_config)
+        self.tool_agents = init_tool_agents(self.config, self.full_config)
 
     def _span_context(self, span_factory, **kwargs):
         """Return a span context when manager tracing is enabled, else a no-op context."""

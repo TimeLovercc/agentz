@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from pydantic import BaseModel, Field
 from loguru import logger
 
@@ -20,12 +20,10 @@ class ToolAgentOutput(BaseModel):
 class DataLoaderAgent:
     """Agent for loading and inspecting datasets."""
 
-    def __init__(self, config: LLMConfig):
+    def __init__(self, config: LLMConfig, full_config: Optional[Dict[str, Any]] = None):
         self.config = config
 
-        self.agent = Agent(
-            name="Data Loader",
-            instructions="""You are a data loading specialist. Generate Python code and analysis for loading and inspecting datasets.
+        default_instructions = """You are a data loading specialist. Generate Python code and analysis for loading and inspecting datasets.
 
 Provide:
 1. Code to load the dataset (pandas, numpy, etc.)
@@ -34,7 +32,15 @@ Provide:
 4. Summary statistics
 5. Any data quality observations
 
-Focus on comprehensive dataset understanding.""",
+Focus on comprehensive dataset understanding."""
+
+        instructions = default_instructions
+        if full_config:
+            instructions = full_config.get('agents', {}).get('tool_agents', {}).get('data_loader_agent', {}).get('instructions', default_instructions)
+
+        self.agent = Agent(
+            name="Data Loader",
+            instructions=instructions,
             model=config.main_model
         )
 
@@ -63,11 +69,10 @@ Focus on comprehensive dataset understanding.""",
 class DataAnalysisAgent:
     """Agent for exploratory data analysis."""
 
-    def __init__(self, config: LLMConfig):
+    def __init__(self, config: LLMConfig, full_config: Optional[Dict[str, Any]] = None):
         self.config = config
-        self.agent = Agent(
-            name="Data Analyst",
-            instructions="""You are an exploratory data analysis specialist. Generate comprehensive Python code and analysis.
+
+        default_instructions = """You are an exploratory data analysis specialist. Generate comprehensive Python code and analysis.
 
 Provide:
 1. Statistical summaries and distributions
@@ -78,7 +83,15 @@ Provide:
 6. Insights and observations
 7. Recommendations for preprocessing
 
-Focus on uncovering insights and data characteristics.""",
+Focus on uncovering insights and data characteristics."""
+
+        instructions = default_instructions
+        if full_config:
+            instructions = full_config.get('agents', {}).get('tool_agents', {}).get('data_analysis_agent', {}).get('instructions', default_instructions)
+
+        self.agent = Agent(
+            name="Data Analyst",
+            instructions=instructions,
             model=config.main_model
         )
 
@@ -107,11 +120,10 @@ Focus on uncovering insights and data characteristics.""",
 class ModelTrainingAgent:
     """Agent for machine learning model training."""
 
-    def __init__(self, config: LLMConfig):
+    def __init__(self, config: LLMConfig, full_config: Optional[Dict[str, Any]] = None):
         self.config = config
-        self.agent = Agent(
-            name="ML Trainer",
-            instructions="""You are a machine learning specialist. Generate comprehensive model training code and analysis.
+
+        default_instructions = """You are a machine learning specialist. Generate comprehensive model training code and analysis.
 
 Provide:
 1. Data preprocessing and feature engineering
@@ -122,7 +134,15 @@ Provide:
 6. Performance evaluation metrics
 7. Model comparison and recommendations
 
-Focus on best practices and comprehensive evaluation.""",
+Focus on best practices and comprehensive evaluation."""
+
+        instructions = default_instructions
+        if full_config:
+            instructions = full_config.get('agents', {}).get('tool_agents', {}).get('model_training_agent', {}).get('instructions', default_instructions)
+
+        self.agent = Agent(
+            name="ML Trainer",
+            instructions=instructions,
             model=config.main_model
         )
 
@@ -151,11 +171,10 @@ Focus on best practices and comprehensive evaluation.""",
 class CodeGenerationAgent:
     """Agent for generating complete code solutions."""
 
-    def __init__(self, config: LLMConfig):
+    def __init__(self, config: LLMConfig, full_config: Optional[Dict[str, Any]] = None):
         self.config = config
-        self.agent = Agent(
-            name="Code Generator",
-            instructions="""You are a senior data scientist and software engineer. Generate complete, production-ready Python code solutions.
+
+        default_instructions = """You are a senior data scientist and software engineer. Generate complete, production-ready Python code solutions.
 
 Provide:
 1. Complete end-to-end pipeline
@@ -167,7 +186,15 @@ Provide:
 7. Error handling and logging
 8. Clear documentation and comments
 
-Focus on creating comprehensive, executable solutions.""",
+Focus on creating comprehensive, executable solutions."""
+
+        instructions = default_instructions
+        if full_config:
+            instructions = full_config.get('agents', {}).get('tool_agents', {}).get('code_generation_agent', {}).get('instructions', default_instructions)
+
+        self.agent = Agent(
+            name="Code Generator",
+            instructions=instructions,
             model=config.main_model
         )
 
@@ -193,25 +220,26 @@ Focus on creating comprehensive, executable solutions.""",
             )
 
 
-def init_tool_agents(config: LLMConfig) -> Dict[str, Any]:
+def init_tool_agents(config: LLMConfig, full_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Initialize all available tool agents.
 
     Args:
         config: LLM configuration
+        full_config: Optional full config dictionary with agent prompts
 
     Returns:
         Dictionary mapping agent names to agent instances
     """
     agents = {
-        "data_loader_agent": DataLoaderAgent(config),
-        "data_analysis_agent": DataAnalysisAgent(config),
-        "preprocessing_agent": DataAnalysisAgent(config),  # Reuse for preprocessing
-        "model_training_agent": ModelTrainingAgent(config),
-        "evaluation_agent": ModelTrainingAgent(config),  # Reuse for evaluation
-        "visualization_agent": DataAnalysisAgent(config),  # Reuse for visualization
-        "code_generation_agent": CodeGenerationAgent(config),
-        "research_agent": CodeGenerationAgent(config),  # Reuse for research
+        "data_loader_agent": DataLoaderAgent(config, full_config),
+        "data_analysis_agent": DataAnalysisAgent(config, full_config),
+        "preprocessing_agent": DataAnalysisAgent(config, full_config),  # Reuse for preprocessing
+        "model_training_agent": ModelTrainingAgent(config, full_config),
+        "evaluation_agent": ModelTrainingAgent(config, full_config),  # Reuse for evaluation
+        "visualization_agent": DataAnalysisAgent(config, full_config),  # Reuse for visualization
+        "code_generation_agent": CodeGenerationAgent(config, full_config),
+        "research_agent": CodeGenerationAgent(config, full_config),  # Reuse for research
     }
 
     logger.info(f"Initialized {len(agents)} tool agents")

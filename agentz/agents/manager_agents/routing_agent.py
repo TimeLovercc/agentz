@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from loguru import logger
 
@@ -22,11 +22,12 @@ class AgentSelectionPlan(BaseModel):
     reasoning: str = Field(description="Reasoning for the agent selection", default="")
 
 
-def create_routing_agent(config: LLMConfig) -> Agent:
+def create_routing_agent(config: LLMConfig, full_config: Optional[Dict[str, Any]] = None) -> Agent:
     """Create a routing agent using OpenAI Agents SDK.
 
     Args:
         config: LLM configuration
+        full_config: Optional full config dictionary with agent prompts
 
     Returns:
         Agent instance configured for task routing
@@ -45,9 +46,7 @@ def create_routing_agent(config: LLMConfig) -> Agent:
 
     available_agents_str = ", ".join(available_agents)
 
-    agent = Agent(
-        name="Task Router",
-        instructions=f"""You are a task routing agent. Your role is to analyze knowledge gaps and route appropriate tasks to specialized agents.
+    default_instructions = f"""You are a task routing agent. Your role is to analyze knowledge gaps and route appropriate tasks to specialized agents.
 
 Available agents: {available_agents_str}
 
@@ -67,7 +66,15 @@ Your task:
 3. Create specific, actionable tasks for each selected agent
 4. Ensure tasks are clear and focused
 
-Create a routing plan with appropriate agents and tasks to address the knowledge gap.""",
+Create a routing plan with appropriate agents and tasks to address the knowledge gap."""
+
+    instructions = default_instructions
+    if full_config:
+        instructions = full_config.get('agents', {}).get('routing_agent', {}).get('instructions', default_instructions)
+
+    agent = Agent(
+        name="Task Router",
+        instructions=instructions,
         output_type=AgentSelectionPlan,
         model=config.main_model
     )

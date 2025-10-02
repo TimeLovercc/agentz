@@ -2,6 +2,7 @@ import os
 from typing import Optional
 from dotenv import load_dotenv
 from agentz.llm.llm_setup import LLMConfig
+from agentz.utils import load_config
 
 
 class BasePipeline:
@@ -18,7 +19,8 @@ class BasePipeline:
         enable_tracing: bool = True,
         trace_include_sensitive_data: bool = False,
         config_dict: Optional[dict] = None,
-        llm_config: Optional[LLMConfig] = None
+        llm_config: Optional[LLMConfig] = None,
+        config_file: Optional[str] = None
     ):
         """
         Initialize base pipeline with automatic environment loading.
@@ -34,6 +36,7 @@ class BasePipeline:
             trace_include_sensitive_data: Whether to include sensitive data in traces
             config_dict: Pre-built config dictionary (alternative to individual params)
             llm_config: Pre-created LLM configuration (alternative to config_dict)
+            config_file: Path to config file (YAML/JSON) - loads all settings from file
         """
         # Load environment variables
         load_dotenv()
@@ -42,6 +45,16 @@ class BasePipeline:
         self.user_prompt = user_prompt
         self.enable_tracing = enable_tracing
         self.trace_include_sensitive_data = trace_include_sensitive_data
+
+        # Load full config from file if provided
+        self.full_config = None
+        if config_file:
+            self.full_config = load_config(config_file)
+            # Extract provider config from full config
+            provider = provider or self.full_config.get('provider')
+            model = model or self.full_config.get('model')
+            api_key = api_key or self.full_config.get('api_key')
+            base_url = base_url or self.full_config.get('base_url')
 
         # Build config from parameters or use provided config_dict
         if llm_config:
