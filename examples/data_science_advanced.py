@@ -1,9 +1,8 @@
-"""Advanced usage of the DataScientistPipeline with typed configuration."""
+"""Advanced usage of the DataScientistPipeline with custom manager agents."""
 
 from agents import Agent
 
 from agentz.agents.base import DefaultAgentOutput
-from agentz.configuration.base import DataScienceConfig
 from pipelines.data_scientist import DataScientistPipeline
 
 DATA_PATH = "data/banana_quality.csv"
@@ -51,11 +50,18 @@ WRITER_AGENT = Agent(
     output_type=DefaultAgentOutput,
 )
 
-ds_config = DataScienceConfig(
-    data_path=DATA_PATH,
-    user_prompt=USER_PROMPT,
-    agents=[EVALUATE_AGENT, ROUTING_AGENT, OBSERVE_AGENT, WRITER_AGENT],
-)
+# Configuration with custom manager agents via config dict
+ds_config = {
+    "config_path": "pipelines/configs/data_science.yaml",
+    "data": {"path": DATA_PATH},
+    "user_prompt": USER_PROMPT,
+    "manager_agents": {
+        "evaluate_agent": EVALUATE_AGENT,
+        "routing_agent": ROUTING_AGENT,
+        "observe_agent": OBSERVE_AGENT,
+        "writer_agent": WRITER_AGENT,
+    },
+}
 
 pipeline = DataScientistPipeline(ds_config)
 

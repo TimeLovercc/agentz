@@ -2,18 +2,13 @@ import asyncio
 import os
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Union
 
 from dotenv import load_dotenv
 from rich.console import Console
 
 from agents.tracing.create import trace
-from agentz.configuration.base import (
-    BaseConfig,
-    PipelineConfigInput,
-    instantiate_pipeline_runtime,
-    prepare_pipeline_config,
-)
+from agentz.configuration.base import BaseConfig, normalize_pipeline_config
 from agentz.llm.llm_setup import LLMConfig
 from agentz.utils import Printer
 from pydantic import BaseModel, Field
@@ -22,47 +17,96 @@ from pydantic import BaseModel, Field
 class BasePipeline:
     """Base class for all pipelines with common configuration and setup."""
 
-    CONFIG_SCHEMA: Optional[type[BaseConfig]] = None
-    DEFAULT_CONFIG_PATH: Optional[Union[str, Path]] = None
-    REQUIRE_DATA_PATH: bool = False
-    REQUIRE_USER_PROMPT: bool = False
-
-    def __init__(self, config: PipelineConfigInput = None):
+    def __init__(
+        self, config: Optional[Union[BaseConfig, Mapping[str, Any], str, Path]] = None
+    ):
         """Initialise the pipeline using a single configuration input."""
         load_dotenv()
 
         self.console = Console()
         self._printer: Optional[Printer] = None
 
-        prepared = prepare_pipeline_config(
+        config_schema = getattr(self, "CONFIG_SCHEMA", None)
+        default_config_path = getattr(self, "DEFAULT_CONFIG_PATH", None)
+
+        # Normalize configuration
+        self.full_config, source_path = normalize_pipeline_config(
             config,
-            config_cls=self.CONFIG_SCHEMA,
-            default_path=self.DEFAULT_CONFIG_PATH,
+            config_cls=config_schema,
+            default_path=default_config_path,
         )
 
-        runtime = instantiate_pipeline_runtime(
-            prepared,
-            llm_config_factory=LLMConfig,
-            api_key_resolver=self._get_api_key_from_env,
-            require_data_path=self.REQUIRE_DATA_PATH,
-            require_user_prompt=self.REQUIRE_USER_PROMPT,
+        # Determine config file path
+        if source_path is not None:
+            self.config_file = source_path
+        elif isinstance(config, (str, Path)):
+            self.config_file = str(config)
+        elif default_config_path is not None:
+            self.config_file = str(default_config_path)
+        else:
+            self.config_file = "<inline>"
+
+        # Extract pipeline settings
+        pipeline_section = self.full_config.get("pipeline")
+        if not isinstance(pipeline_section, Mapping):
+            pipeline_section = {}
+
+        self.enable_tracing = bool(pipeline_section.get("enable_tracing", True))
+        self.trace_include_sensitive_data = bool(
+            pipeline_section.get("trace_include_sensitive_data", False)
         )
 
-        self._resolved_config = runtime.resolved
-        self.full_config = runtime.full_config
-        self._resolved_config.config_dict = self.full_config
+        # Extract provider and API key
+        provider = self.full_config.get("provider")
+        if not provider:
+            raise ValueError("Configuration missing required field 'provider'")
 
-        self.config_file = prepared.config_file
-        self._resolved_config.source_path = prepared.config_file
+        api_key = self.full_config.get("api_key")
+        if not api_key:
+            api_key = self._get_api_key_from_env(provider)
 
-        self.enable_tracing = runtime.enable_tracing
-        self.trace_include_sensitive_data = runtime.trace_include_sensitive_data
+        if not api_key:
+            raise ValueError("Unable to determine API key from config or environment")
 
-        self.config_dict = runtime.config_dict
-        self.config = runtime.llm_config
+        # Build LLM config dict
+        self.config_dict: Dict[str, Any] = {
+            "provider": provider,
+            "api_key": api_key,
+        }
+        for optional_key in (
+            "model",
+            "base_url",
+            "model_settings",
+            "azure_config",
+            "aws_config",
+        ):
+            if optional_key in self.full_config:
+                self.config_dict[optional_key] = self.full_config[optional_key]
 
-        self.data_path = runtime.data_path
-        self.user_prompt = runtime.user_prompt
+        # Create LLM config
+        self.config = LLMConfig(self.config_dict, self.full_config)
+
+        # Extract data path and user prompt
+        data_section = self.full_config.get("data")
+        if not isinstance(data_section, MutableMapping):
+            data_section = {}
+            self.full_config["data"] = data_section
+
+        self.data_path = data_section.get("path")
+        self.user_prompt = self.full_config.get("user_prompt") or data_section.get("prompt")
+
+        # Validate required fields
+        require_data_path = bool(getattr(self, "REQUIRE_DATA_PATH", False))
+        require_user_prompt = bool(getattr(self, "REQUIRE_USER_PROMPT", False))
+
+        if require_data_path and not self.data_path:
+            raise ValueError(
+                "This pipeline requires 'data_path' in the configuration or as an argument"
+            )
+        if require_user_prompt and not self.user_prompt:
+            raise ValueError(
+                "This pipeline requires 'user_prompt' in the configuration or as an argument"
+            )
 
     @property
     def provider_name(self) -> str:
@@ -71,15 +115,6 @@ class BasePipeline:
     @property
     def printer(self) -> Optional[Printer]:
         return self._printer
-
-    @property
-    def config_object(self):
-        return getattr(self._resolved_config, "config_object", None)
-
-    @property
-    def config_attachments(self) -> Dict[str, Any]:
-        attachments = getattr(self._resolved_config, "attachments", None)
-        return attachments if attachments is not None else {}
 
     @property
     def pipeline_settings(self) -> Dict[str, Any]:

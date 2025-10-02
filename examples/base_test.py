@@ -1,5 +1,5 @@
 from agentz.configuration.base import BaseConfig
-from pipelines.data_scientist import DataScientistPipeline
+from pipelines.base import BasePipeline
 
 
 ds_config = BaseConfig(
@@ -12,6 +12,6 @@ ds_config = BaseConfig(
     )
 )
 
-pipe = DataScientistPipeline(ds_config)
+pipe = BasePipeline(ds_config)
 
 pipe.run_sync()

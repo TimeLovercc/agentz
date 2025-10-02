@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Dict, Optional
+from pathlib import Path
+from typing import Any, Dict, Mapping, Optional, Union
 
 from loguru import logger
 
@@ -19,12 +20,7 @@ from agentz.agents.manager_agents.routing_agent import (
 )
 from agentz.agents.manager_agents.writer_agent import create_writer_agent
 from agentz.agents.worker_agents.tool_agents import init_tool_agents
-from agentz.configuration.base import (
-    DataScienceConfig,
-    PipelineConfigInput,
-    instantiate_agent_spec,
-    instantiate_tool_agent_spec,
-)
+from agentz.configuration.base import BaseConfig
 from agentz.memory.global_memory import global_memory
 from agentz.utils import get_experiment_timestamp
 from pipelines.base import BasePipeline, Conversation
@@ -32,34 +28,45 @@ from pipelines.base import BasePipeline, Conversation
 DEFAULT_PIPELINE_CONFIG_PATH = "pipelines/configs/data_science.yaml"
 
 
+def _instantiate_agent_spec(spec, config):
+    """Instantiate a manager agent from the provided specification."""
+    if callable(spec):
+        return spec(config)
+    if hasattr(spec, "clone"):
+        cloned = spec.clone()
+        if getattr(cloned, "model", None) is None:
+            cloned.model = config.main_model
+        return cloned
+    return spec
+
+
+def _instantiate_tool_agent_spec(spec, config):
+    """Instantiate a tool agent from the provided specification."""
+    if callable(spec):
+        return spec(config)
+    return spec
+
+
 class DataScientistPipeline(BasePipeline):
     """Main pipeline orchestrator for data analysis tasks using iterative research."""
 
-    CONFIG_SCHEMA = DataScienceConfig
+    CONFIG_SCHEMA = BaseConfig
     DEFAULT_CONFIG_PATH = DEFAULT_PIPELINE_CONFIG_PATH
     REQUIRE_DATA_PATH = True
     REQUIRE_USER_PROMPT = True
 
-    def __init__(self, config: PipelineConfigInput = None):
+    def __init__(
+        self, config: Optional[Union[BaseConfig, Mapping[str, Any], str, Path]] = None
+    ):
         """Initialize the DataScientistPipeline with flexible configuration input."""
 
         super().__init__(config)
 
-        attachment_overrides = self.config_attachments.get("manager_agents", {})
-        if attachment_overrides and not isinstance(attachment_overrides, dict):
-            raise TypeError("manager_agents overrides must be provided as a mapping")
-
-        inline_overrides = self.full_config.get("manager_agents")
-        if inline_overrides and not isinstance(inline_overrides, dict):
+        manager_overrides = self.full_config.get("manager_agents")
+        if manager_overrides and not isinstance(manager_overrides, dict):
             raise TypeError("manager_agents section in config must be a mapping")
 
-        manager_overrides: Dict[str, Any] = {}
-        if isinstance(inline_overrides, dict):
-            manager_overrides.update(inline_overrides)
-        if isinstance(attachment_overrides, dict):
-            manager_overrides.update(attachment_overrides)
-
-        self._manager_agent_overrides = manager_overrides
+        self._manager_agent_overrides = manager_overrides if isinstance(manager_overrides, dict) else {}
 
         self.experiment_id = get_experiment_timestamp()
 
@@ -111,27 +118,20 @@ class DataScientistPipeline(BasePipeline):
 
     def _resolve_manager_agent(self, name: str, factory):
         if name in self._manager_agent_overrides:
-            return instantiate_agent_spec(self._manager_agent_overrides[name], self.config)
+            return _instantiate_agent_spec(self._manager_agent_overrides[name], self.config)
         return factory(self.config)
 
     def _build_tool_agents(self) -> Dict[str, Any]:
-        attachments = self.config_attachments.get("tool_agents", {})
-        if attachments and not isinstance(attachments, dict):
-            raise TypeError("tool_agents overrides must be provided as a mapping")
-
         tool_agents = init_tool_agents(self.config)
-        inline_overrides = self.full_config.get("tool_agents")
-        if inline_overrides and not isinstance(inline_overrides, dict):
+
+        tool_overrides = self.full_config.get("tool_agents")
+        if tool_overrides and not isinstance(tool_overrides, dict):
             raise TypeError("tool_agents section in config must be a mapping")
 
-        combined_overrides: Dict[str, Any] = {}
-        if isinstance(inline_overrides, dict):
-            combined_overrides.update(inline_overrides)
-        if isinstance(attachments, dict):
-            combined_overrides.update(attachments)
+        if isinstance(tool_overrides, dict):
+            for tool_name, spec in tool_overrides.items():
+                tool_agents[tool_name] = _instantiate_tool_agent_spec(spec, self.config)
 
-        for tool_name, spec in combined_overrides.items():
-            tool_agents[tool_name] = instantiate_tool_agent_spec(spec, self.config)
         return tool_agents
 
     def _setup_tracing(self):
