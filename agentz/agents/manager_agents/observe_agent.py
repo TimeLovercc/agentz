@@ -3,7 +3,7 @@ from __future__ import annotations
 from loguru import logger
 
 from agents import Agent
-from ds1.src.llm.llm_setup import LLMConfig
+from agentz.llm.llm_setup import LLMConfig
 
 
 def create_observe_agent(config: LLMConfig) -> Agent:

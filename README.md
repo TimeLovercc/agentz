@@ -27,9 +27,6 @@ This project uses [uv](https://docs.astral.sh/uv/) for fast, reliable package ma
 # macOS/Linux
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Windows
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-
 # Or via pip
 pip install uv
 ```

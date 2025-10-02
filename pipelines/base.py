@@ -1,7 +1,7 @@
 import os
 from typing import Optional
 from dotenv import load_dotenv
-from ds1.src.llm.llm_setup import LLMConfig
+from agentz.llm.llm_setup import LLMConfig
 
 
 class BasePipeline:

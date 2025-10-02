@@ -10,14 +10,14 @@ from loguru import logger
 
 from agents import Runner
 from agents.tracing.create import trace, agent_span, function_span
-from src.agents.manager_agents.evaluate_agent import create_evaluate_agent, KnowledgeGapOutput
-from src.agents.manager_agents.observe_agent import create_observe_agent
-from src.agents.manager_agents.routing_agent import create_routing_agent, AgentTask, AgentSelectionPlan
-from src.agents.manager_agents.writer_agent import create_writer_agent
-from src.agents.manager_agents.tool_agents import init_tool_agents, ToolAgentOutput
-from src.memory.global_memory import global_memory
-from src.utils import get_experiment_timestamp
-from ds1.src.llm.llm_setup import LLMConfig
+from agentz.agents.manager_agents.evaluate_agent import create_evaluate_agent, KnowledgeGapOutput
+from agentz.agents.manager_agents.observe_agent import create_observe_agent
+from agentz.agents.manager_agents.routing_agent import create_routing_agent, AgentTask, AgentSelectionPlan
+from agentz.agents.manager_agents.writer_agent import create_writer_agent
+from agentz.agents.manager_agents.tool_agents import init_tool_agents, ToolAgentOutput
+from agentz.memory.global_memory import global_memory
+from agentz.utils import get_experiment_timestamp
+from agentz.llm.llm_setup import LLMConfig
 from pipelines.base import BasePipeline
 
 

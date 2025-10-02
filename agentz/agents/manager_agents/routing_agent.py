@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from loguru import logger
 
 from agents import Agent
-from ds1.src.llm.llm_setup import LLMConfig
+from agentz.llm.llm_setup import LLMConfig
 
 
 class AgentTask(BaseModel):
