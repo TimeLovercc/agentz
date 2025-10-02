@@ -19,9 +19,9 @@ from agentz.agents.manager_agents.routing_agent import (
 )
 from agentz.agents.manager_agents.writer_agent import create_writer_agent
 from agentz.agents.worker_agents.tool_agents import init_tool_agents
-from agentz.configuration.base import PipelineConfigInput
-from agentz.configuration.data_science import (
+from agentz.configuration.base import (
     DataScienceConfig,
+    PipelineConfigInput,
     instantiate_agent_spec,
     instantiate_tool_agent_spec,
 )
@@ -41,14 +41,8 @@ class DataScientistPipeline(BasePipeline):
     REQUIRE_USER_PROMPT = True
 
     def __init__(self, config: PipelineConfigInput = None):
-        """
-        Initialize the DataScientistPipeline.
+        """Initialize the DataScientistPipeline with flexible configuration input."""
 
-        Args:
-            config: Accepts a configuration path, mapping, typed
-                :class:`DataScienceConfig`, or resolved payload. When omitted the
-                default YAML specification is loaded.
-        """
         super().__init__(config)
 
         attachment_overrides = self.config_attachments.get("manager_agents", {})
@@ -70,8 +64,9 @@ class DataScientistPipeline(BasePipeline):
         self.experiment_id = get_experiment_timestamp()
 
         pipeline_settings = self.pipeline_settings
-        self.workflow_name = pipeline_settings.get("workflow_name") or pipeline_settings.get(
-            "name"
+        self.workflow_name = (
+            pipeline_settings.get("workflow_name")
+            or pipeline_settings.get("name")
         )
         if not self.workflow_name:
             self.workflow_name = f"data_science_pipeline_{self.experiment_id}"

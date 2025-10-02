@@ -3,7 +3,7 @@
 from agents import Agent
 
 from agentz.agents.base import DefaultAgentOutput
-from agentz.configuration.data_science import DataScienceConfig
+from agentz.configuration.base import DataScienceConfig
 from pipelines.data_scientist import DataScientistPipeline
 
 DATA_PATH = "data/banana_quality.csv"
