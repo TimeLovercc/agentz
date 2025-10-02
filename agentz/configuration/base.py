@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, MutableMapping, Optional, Union
@@ -11,6 +12,7 @@ from pydantic import BaseModel, ConfigDict
 from agentz.utils import load_config
 
 PipelineConfigSource = Union["PipelineConfigBase", Mapping[str, Any], str, Path]
+PipelineConfigInput = Optional[Union[PipelineConfigSource, "ResolvedPipelineConfig"]]
 ConfigResolver = Callable[[PipelineConfigSource], "ResolvedPipelineConfig"]
 
 
@@ -25,9 +27,9 @@ class ResolvedPipelineConfig:
 
     def copy(self) -> "ResolvedPipelineConfig":
         return ResolvedPipelineConfig(
-            config_dict=dict(self.config_dict),
+            config_dict=deepcopy(self.config_dict),
             config_object=self.config_object,
-            attachments=dict(self.attachments),
+            attachments=deepcopy(self.attachments),
             source_path=self.source_path,
         )
 
@@ -108,11 +110,56 @@ def resolve_config_source(
     )
 
 
+def normalize_pipeline_config(
+    source: PipelineConfigInput,
+    *,
+    config_cls: Optional[type[PipelineConfigBase]] = None,
+    default_path: Optional[Union[str, Path]] = None,
+) -> ResolvedPipelineConfig:
+    """Normalise unstructured pipeline inputs into a resolved configuration.
+
+    Args:
+        source: User-supplied configuration input. Accepts the same variants as
+            :data:`PipelineConfigSource`, an already resolved payload, or ``None``.
+        config_cls: Optional Pydantic model used to coerce mappings into strongly
+            typed objects.
+        default_path: Optional fallback invoked when ``source`` is ``None``.
+
+    Returns:
+        A :class:`ResolvedPipelineConfig` instance that encapsulates the merged
+        configuration dictionary, attachments, and provenance metadata.
+    """
+
+    if source is None:
+        if default_path is None:
+            raise ValueError(
+                "A configuration source must be provided or a default_path must be set."
+            )
+        source = default_path
+
+    if isinstance(source, ResolvedPipelineConfig):
+        resolved = source.copy()
+        if config_cls and resolved.config_object is not None:
+            if not isinstance(resolved.config_object, config_cls):
+                coerced = config_cls.from_mapping(resolved.config_dict)
+                refreshed = coerced.resolve()
+                refreshed.attachments.update(resolved.attachments)
+                if resolved.source_path and refreshed.source_path is None:
+                    refreshed.source_path = resolved.source_path
+                return refreshed
+        return resolved
+
+    resolved = resolve_config_source(source, config_cls=config_cls)
+    return resolved.copy()
+
+
 __all__ = [
     "ConfigResolver",
     "PipelineConfigBase",
     "PipelineConfigSource",
+    "PipelineConfigInput",
     "ResolvedPipelineConfig",
     "load_mapping_from_path",
+    "normalize_pipeline_config",
     "resolve_config_source",
 ]

@@ -49,11 +49,7 @@ uv sync
 ```python
 from pipelines.data_scientist import DataScientistPipeline
 
-pipe = DataScientistPipeline(
-    config_file="pipelines/configs/data_science.yaml",
-    data_path="data/banana_quality.csv",
-    user_prompt="Build a model to classify banana quality as good or bad based on their numerical information about bananas of different quality (size, weight, sweetness, softness, harvest time, ripeness, and acidity). We have uploaded the entire dataset for you here in the banana_quality.csv file.",
-)
+pipe = DataScientistPipeline("pipelines/configs/data_science.yaml")
 
 pipe.run_sync()
 ```
@@ -67,9 +63,12 @@ Inherit from `BasePipeline` to create your own agent workflow:
 ```python
 from pipelines.base import BasePipeline
 
+
 class MyCustomPipeline(BasePipeline):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    DEFAULT_CONFIG_PATH = "pipelines/configs/my_pipeline.yaml"
+
+    def __init__(self, config=None):
+        super().__init__(config)
         # Add your custom initialization
 
     async def run(self):

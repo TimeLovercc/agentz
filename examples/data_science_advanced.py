@@ -3,6 +3,7 @@
 from agents import Agent
 
 from agentz.agents.base import DefaultAgentOutput
+from agentz.configuration.data_science import DataScienceConfig
 from pipelines.data_scientist import DataScientistPipeline
 
 DATA_PATH = "data/banana_quality.csv"
@@ -50,10 +51,12 @@ WRITER_AGENT = Agent(
     output_type=DefaultAgentOutput,
 )
 
-pipeline = DataScientistPipeline(
+ds_config = DataScienceConfig(
     data_path=DATA_PATH,
     user_prompt=USER_PROMPT,
     agents=[EVALUATE_AGENT, ROUTING_AGENT, OBSERVE_AGENT, WRITER_AGENT],
 )
+
+pipeline = DataScientistPipeline(ds_config)
 
 pipeline.run_sync()

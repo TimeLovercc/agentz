@@ -19,104 +19,70 @@ from agentz.agents.manager_agents.routing_agent import (
 )
 from agentz.agents.manager_agents.writer_agent import create_writer_agent
 from agentz.agents.worker_agents.tool_agents import init_tool_agents
-from agentz.configuration.base import PipelineConfigSource
+from agentz.configuration.base import PipelineConfigInput
 from agentz.configuration.data_science import (
-    ManagerAgentInput,
+    DataScienceConfig,
     instantiate_agent_spec,
     instantiate_tool_agent_spec,
-    normalise_manager_agent_specs,
-    resolve_data_science_config,
 )
 from agentz.memory.global_memory import global_memory
 from agentz.utils import get_experiment_timestamp
 from pipelines.base import BasePipeline, Conversation
 
-DEFAULT_CONFIG_PATH = "pipelines/configs/data_science.yaml"
+DEFAULT_PIPELINE_CONFIG_PATH = "pipelines/configs/data_science.yaml"
 
 
 class DataScientistPipeline(BasePipeline):
     """Main pipeline orchestrator for data analysis tasks using iterative research."""
 
-    def __init__(
-        self,
-        *,
-        config: Optional[PipelineConfigSource] = None,
-        config_file: Optional[str] = None,
-        data_path: Optional[str] = None,
-        user_prompt: Optional[str] = None,
-        agents: Optional[ManagerAgentInput] = None,
-        workflow_name: Optional[str] = None,
-        overrides: Optional[Dict[str, Any]] = None,
-        enable_tracing: bool = True,
-        trace_include_sensitive_data: bool = False,
-    ):
+    CONFIG_SCHEMA = DataScienceConfig
+    DEFAULT_CONFIG_PATH = DEFAULT_PIPELINE_CONFIG_PATH
+    REQUIRE_DATA_PATH = True
+    REQUIRE_USER_PROMPT = True
+
+    def __init__(self, config: PipelineConfigInput = None):
         """
         Initialize the DataScientistPipeline.
 
         Args:
-            config: Configuration object, mapping, or path resolving to pipeline settings.
-            config_file: Backwards compatible path to configuration file.
-            data_path: Optional dataset path for this run; falls back to config value.
-            user_prompt: Optional task description; falls back to config value.
-            agents: Optional manager agent overrides provided either as a mapping
-                or a list in (evaluate, routing, observe, writer) order.
-            workflow_name: Optional custom name used when tracing spans.
-            overrides: Optional dictionary merged into the loaded config for
-                ad-hoc adjustments.
-            enable_tracing: Whether to enable OpenAI Agents SDK tracing.
-            trace_include_sensitive_data: Whether sensitive data is included in traces.
+            config: Accepts a configuration path, mapping, typed
+                :class:`DataScienceConfig`, or resolved payload. When omitted the
+                default YAML specification is loaded.
         """
-        if config is not None and config_file is not None:
-            raise ValueError("Provide either 'config' or 'config_file', not both")
+        super().__init__(config)
 
-        config_source: PipelineConfigSource
-        self._direct_manager_agent_specs = (
-            normalise_manager_agent_specs(agents) if agents is not None else {}
-        )
+        attachment_overrides = self.config_attachments.get("manager_agents", {})
+        if attachment_overrides and not isinstance(attachment_overrides, dict):
+            raise TypeError("manager_agents overrides must be provided as a mapping")
 
-        if config is not None:
-            config_source = config
-        else:
-            config_source = config_file or DEFAULT_CONFIG_PATH
+        inline_overrides = self.full_config.get("manager_agents")
+        if inline_overrides and not isinstance(inline_overrides, dict):
+            raise TypeError("manager_agents section in config must be a mapping")
 
-        # Initialize base class (handles env loading, config creation)
-        super().__init__(
-            config_source=config_source,
-            config_resolver=resolve_data_science_config,
-            data_path=data_path,
-            user_prompt=user_prompt,
-            overrides=overrides,
-            enable_tracing=enable_tracing,
-            trace_include_sensitive_data=trace_include_sensitive_data,
-        )
+        manager_overrides: Dict[str, Any] = {}
+        if isinstance(inline_overrides, dict):
+            manager_overrides.update(inline_overrides)
+        if isinstance(attachment_overrides, dict):
+            manager_overrides.update(attachment_overrides)
 
-        if not self.data_path:
-            raise ValueError(
-                "DataScientistPipeline requires 'data_path' in config or argument"
-            )
-        if not self.user_prompt:
-            raise ValueError(
-                "DataScientistPipeline requires 'user_prompt' in config or argument"
-            )
+        self._manager_agent_overrides = manager_overrides
 
         self.experiment_id = get_experiment_timestamp()
-        self.workflow_name = (
-            workflow_name or f"data_science_pipeline_{self.experiment_id}"
-        )
 
-        # Get pipeline settings from config file if available
-        pipeline_settings = {}
-        pipeline_settings = (
-            self.full_config.get("pipeline", {})
-            if isinstance(self.full_config.get("pipeline"), dict)
-            else {}
+        pipeline_settings = self.pipeline_settings
+        self.workflow_name = pipeline_settings.get("workflow_name") or pipeline_settings.get(
+            "name"
         )
+        if not self.workflow_name:
+            self.workflow_name = f"data_science_pipeline_{self.experiment_id}"
 
-        # Research workflow configuration
         self.max_iterations = pipeline_settings.get("max_iterations", 5)
         self.max_time_minutes = pipeline_settings.get("max_time_minutes", 10)
         self.verbose = pipeline_settings.get("verbose", True)
-        self.research_workflow_name = f"researcher_{self.experiment_id}"
+        self.research_workflow_name = pipeline_settings.get(
+            "research_workflow_name",
+            f"researcher_{self.experiment_id}",
+        )
 
         # State for iterative research loop
         self.iteration = 0
@@ -145,27 +111,31 @@ class DataScientistPipeline(BasePipeline):
 
         logger.info(
             f"Initialized DataAgentPipeline with experiment_id: {self.experiment_id}, "
-            f"tracing: {enable_tracing}, sensitive_data: {trace_include_sensitive_data}"
+            f"tracing: {self.enable_tracing}, sensitive_data: {self.trace_include_sensitive_data}"
         )
 
     def _resolve_manager_agent(self, name: str, factory):
-        if name in self._direct_manager_agent_specs:
-            return instantiate_agent_spec(
-                self._direct_manager_agent_specs[name], self.config
-            )
-
-        overrides = self.config_attachments.get("manager_agents", {})
-        if name in overrides:
-            return instantiate_agent_spec(overrides[name], self.config)
+        if name in self._manager_agent_overrides:
+            return instantiate_agent_spec(self._manager_agent_overrides[name], self.config)
         return factory(self.config)
 
     def _build_tool_agents(self) -> Dict[str, Any]:
-        overrides = self.config_attachments.get("tool_agents", {})
-        if overrides and not isinstance(overrides, dict):
+        attachments = self.config_attachments.get("tool_agents", {})
+        if attachments and not isinstance(attachments, dict):
             raise TypeError("tool_agents overrides must be provided as a mapping")
 
         tool_agents = init_tool_agents(self.config)
-        for tool_name, spec in overrides.items():
+        inline_overrides = self.full_config.get("tool_agents")
+        if inline_overrides and not isinstance(inline_overrides, dict):
+            raise TypeError("tool_agents section in config must be a mapping")
+
+        combined_overrides: Dict[str, Any] = {}
+        if isinstance(inline_overrides, dict):
+            combined_overrides.update(inline_overrides)
+        if isinstance(attachments, dict):
+            combined_overrides.update(attachments)
+
+        for tool_name, spec in combined_overrides.items():
             tool_agents[tool_name] = instantiate_tool_agent_spec(spec, self.config)
         return tool_agents
 

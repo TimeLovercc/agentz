@@ -2,93 +2,70 @@ import asyncio
 import os
 from contextlib import nullcontext
 from copy import deepcopy
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 
 from dotenv import load_dotenv
 from rich.console import Console
 
 from agents.tracing.create import trace
 from agentz.configuration.base import (
-    ConfigResolver,
-    PipelineConfigSource,
+    PipelineConfigBase,
+    PipelineConfigInput,
     ResolvedPipelineConfig,
+    normalize_pipeline_config,
 )
 from agentz.llm.llm_setup import LLMConfig
-from agentz.utils import Printer, load_config
+from agentz.utils import Printer
 from pydantic import BaseModel, Field
 
 
 class BasePipeline:
     """Base class for all pipelines with common configuration and setup."""
 
-    def __init__(
-        self,
-        *,
-        config_file: Optional[str] = None,
-        config_source: Optional[PipelineConfigSource] = None,
-        config_resolver: Optional[ConfigResolver] = None,
-        data_path: Optional[str] = None,
-        user_prompt: Optional[str] = None,
-        overrides: Optional[Dict[str, Any]] = None,
-        enable_tracing: bool = True,
-        trace_include_sensitive_data: bool = False,
-    ):
+    CONFIG_SCHEMA: Optional[type[PipelineConfigBase]] = None
+    DEFAULT_CONFIG_PATH: Optional[Union[str, Path]] = None
+    REQUIRE_DATA_PATH: bool = False
+    REQUIRE_USER_PROMPT: bool = False
+
+    def __init__(self, config: PipelineConfigInput = None):
         """
         Initialize base pipeline with automatic environment loading.
 
         Args:
-            config_file: Path to the configuration file (YAML/JSON).
-            config_source: Alternative configuration input (dict, config object, path).
-            config_resolver: Optional resolver used when `config_source` is supplied.
-            data_path: Optional dataset path for this run; overrides config value.
-            user_prompt: Optional user prompt; overrides config value.
-            overrides: Optional dictionary merged into the loaded config for
-                ad-hoc tweaks (e.g., adjusting provider/model at runtime).
-            enable_tracing: Whether to enable tracing support.
-            trace_include_sensitive_data: Whether to include sensitive data in traces.
+            config: Configuration input (mapping, path, Pydantic model, or an
+                already-resolved payload). When omitted, ``DEFAULT_CONFIG_PATH``
+                is used if provided by the subclass.
         """
         # Load environment variables
         load_dotenv()
 
-        self.enable_tracing = enable_tracing
-        self.trace_include_sensitive_data = trace_include_sensitive_data
         self.console = Console()
         self._printer: Optional[Printer] = None
 
-        resolved_config: Optional[ResolvedPipelineConfig] = None
+        resolved_config = normalize_pipeline_config(
+            config,
+            config_cls=self.CONFIG_SCHEMA,
+            default_path=self.DEFAULT_CONFIG_PATH,
+        )
 
-        if config_source is not None:
-            if config_resolver is None:
-                raise ValueError(
-                    "'config_resolver' must be provided when using 'config_source'"
-                )
-            resolved_config = config_resolver(config_source)
-        elif config_file is not None:
-            if config_resolver is not None:
-                resolved_config = config_resolver(config_file)
-            else:
-                raw_config = load_config(config_file)
-                resolved_config = ResolvedPipelineConfig(
-                    config_dict=dict(raw_config),
-                    source_path=config_file,
-                )
-        else:
-            raise ValueError(
-                "Either 'config_file' or 'config_source' must be provided to initialize a pipeline"
-            )
+        self._resolved_config: ResolvedPipelineConfig = resolved_config
+        self.full_config = deepcopy(resolved_config.config_dict)
 
-        resolved_clone = resolved_config.copy()
-        base_config = deepcopy(resolved_clone.config_dict)
-        if overrides:
-            config_data = _deep_merge_dicts(base_config, overrides)
-        else:
-            config_data = base_config
+        inferred_path = resolved_config.source_path
+        if inferred_path is None and self.DEFAULT_CONFIG_PATH is not None:
+            inferred_path = str(self.DEFAULT_CONFIG_PATH)
+        self.config_file = inferred_path or "<inline>"
+        self._resolved_config.source_path = self.config_file
 
-        self._resolved_config = resolved_clone
-        self.full_config = config_data
-        inferred_path = resolved_clone.source_path or config_file or "<inline>"
-        self.config_file = inferred_path
-        self._resolved_config.source_path = inferred_path
+        pipeline_section = self.full_config.get("pipeline")
+        if not isinstance(pipeline_section, dict):
+            pipeline_section = {}
+
+        self.enable_tracing = bool(pipeline_section.get("enable_tracing", True))
+        self.trace_include_sensitive_data = bool(
+            pipeline_section.get("trace_include_sensitive_data", False)
+        )
 
         # Build LLM configuration from merged settings
         provider = self.full_config.get("provider")
@@ -120,21 +97,29 @@ class BasePipeline:
         self.config = LLMConfig(self.config_dict, self.full_config)
 
         # Persist frequently used fields
-        existing_data_section = self.full_config.get("data")
-        data_section = existing_data_section if isinstance(existing_data_section, dict) else {}
-        self.data_path = data_path or data_section.get("path")
-        self.user_prompt = (
-            user_prompt
-            or self.full_config.get("user_prompt")
-            or data_section.get("prompt")
+        data_section = self.full_config.get("data")
+        if not isinstance(data_section, dict):
+            data_section = {}
+            self.full_config["data"] = data_section
+
+        self.data_path = data_section.get("path")
+        self.user_prompt = self.full_config.get("user_prompt") or data_section.get(
+            "prompt"
         )
 
         if self.data_path:
-            if not isinstance(self.full_config.get("data"), dict):
-                self.full_config["data"] = {}
-            self.full_config["data"]["path"] = self.data_path
+            data_section["path"] = self.data_path
         if self.user_prompt:
             self.full_config["user_prompt"] = self.user_prompt
+
+        if self.REQUIRE_DATA_PATH and not self.data_path:
+            raise ValueError(
+                "This pipeline requires 'data_path' in the configuration or as an argument"
+            )
+        if self.REQUIRE_USER_PROMPT and not self.user_prompt:
+            raise ValueError(
+                "This pipeline requires 'user_prompt' in the configuration or as an argument"
+            )
 
     @property
     def provider_name(self) -> str:
@@ -152,6 +137,11 @@ class BasePipeline:
     def config_attachments(self) -> Dict[str, Any]:
         attachments = getattr(self._resolved_config, "attachments", None)
         return attachments if attachments is not None else {}
+
+    @property
+    def pipeline_settings(self) -> Dict[str, Any]:
+        settings = self.full_config.get("pipeline")
+        return settings if isinstance(settings, dict) else {}
 
     def start_printer(self) -> Printer:
         if self._printer is None:
@@ -275,19 +265,3 @@ class Conversation(BaseModel):
                 conversation += f"<findings>\n{joined_findings}\n</findings>\n\n"
 
         return conversation
-
-
-def _deep_merge_dicts(base: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:
-    """Recursively merge two dictionaries without mutating the originals."""
-
-    merged = deepcopy(base)
-    for key, value in updates.items():
-        if (
-            key in merged
-            and isinstance(merged[key], dict)
-            and isinstance(value, dict)
-        ):
-            merged[key] = _deep_merge_dicts(merged[key], value)
-        else:
-            merged[key] = deepcopy(value)
-    return merged
