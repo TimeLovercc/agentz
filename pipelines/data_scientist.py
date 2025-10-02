@@ -5,18 +5,26 @@ import time
 from contextlib import nullcontext
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, Field
 from loguru import logger
+from pydantic import BaseModel, Field
+from rich.console import Console
 
 from agents import Runner
-from agents.tracing.create import trace, agent_span, function_span
-from agentz.agents.manager_agents.evaluate_agent import create_evaluate_agent, KnowledgeGapOutput
+from agents.tracing.create import agent_span, function_span, trace
+from agentz.agents.manager_agents.evaluate_agent import (
+    KnowledgeGapOutput,
+    create_evaluate_agent,
+)
 from agentz.agents.manager_agents.observe_agent import create_observe_agent
-from agentz.agents.manager_agents.routing_agent import create_routing_agent, AgentTask, AgentSelectionPlan
+from agentz.agents.manager_agents.routing_agent import (
+    AgentSelectionPlan,
+    AgentTask,
+    create_routing_agent,
+)
 from agentz.agents.manager_agents.writer_agent import create_writer_agent
-from agentz.agents.worker_agents.tool_agents import init_tool_agents, ToolAgentOutput
+from agentz.agents.worker_agents.tool_agents import ToolAgentOutput, init_tool_agents
 from agentz.memory.global_memory import global_memory
-from agentz.utils import get_experiment_timestamp
+from agentz.utils import Printer, get_experiment_timestamp
 from agentz.llm.llm_setup import LLMConfig
 from pipelines.base import BasePipeline
 
@@ -126,6 +134,8 @@ class DataScientistPipeline(BasePipeline):
             config_file=config_file
         )
 
+        self.console = Console()
+        self.printer: Optional[Printer] = None
         self.experiment_id = get_experiment_timestamp()
         self.workflow_name = workflow_name or f"data_science_pipeline_{self.experiment_id}"
 
@@ -142,7 +152,8 @@ class DataScientistPipeline(BasePipeline):
             tracing=enable_tracing,
             config=self.config,
             trace_include_sensitive_data=trace_include_sensitive_data,
-            workflow_name=f"researcher_{self.experiment_id}"
+            workflow_name=f"researcher_{self.experiment_id}",
+            console=self.console,
         )
 
         # Handle tracing configuration and setup with user-friendly defaults
@@ -152,31 +163,58 @@ class DataScientistPipeline(BasePipeline):
 
     def _setup_tracing(self):
         """Setup tracing configuration with user-friendly output."""
+        provider = (self.config_dict or {}).get('provider', 'unknown provider')
         if self.enable_tracing:
-            print("🍌 Starting Data Science Pipeline with Tracing")
-            print(f"📊 Data: {self.data_path}")
-            print(f"🔧 Provider: {self.config_dict['provider']}")
-            print(f"🤖 Model: {self.config.model_name}")
-            print(f"📋 Task: {self.user_prompt[:100]}...")
-            print(f"🔍 Tracing: Enabled")
-            print(f"🔒 Sensitive Data in Traces: {'Yes' if self.trace_include_sensitive_data else 'No'}")
-            print(f"🏷️ Workflow: {self.workflow_name}")
+            self.console.print("🍌 Starting Data Science Pipeline with Tracing")
+            self.console.print(f"📊 Data: {self.data_path}")
+            self.console.print(f"🔧 Provider: {provider}")
+            self.console.print(f"🤖 Model: {self.config.model_name}")
+            self.console.print(f"📋 Task: {self.user_prompt[:100]}...")
+            self.console.print("🔍 Tracing: Enabled")
+            self.console.print(
+                f"🔒 Sensitive Data in Traces: {'Yes' if self.trace_include_sensitive_data else 'No'}"
+            )
+            self.console.print(f"🏷️ Workflow: {self.workflow_name}")
         else:
-            print("🍌 Starting Data Science Pipeline")
-            print(f"📊 Data: {self.data_path}")
-            print(f"🔧 Provider: {self.config_dict['provider']}")
-            print(f"🤖 Model: {self.config.model_name}")
+            self.console.print("🍌 Starting Data Science Pipeline")
+            self.console.print(f"📊 Data: {self.data_path}")
+            self.console.print(f"🔧 Provider: {provider}")
+            self.console.print(f"🤖 Model: {self.config.model_name}")
 
     def _span_context(self, span_factory, **kwargs):
         """Return a span context when tracing is enabled, else a no-op context."""
         return span_factory(**kwargs) if self.enable_tracing else nullcontext()
+
+    def _start_printer(self) -> None:
+        """Create and attach a live status printer for this run."""
+        if self.printer is None:
+            self.printer = Printer(self.console)
+            self.researcher.attach_printer(self.printer)
+
+    def _stop_printer(self) -> None:
+        """Stop the live printer if it's currently active."""
+        if self.printer is not None:
+            self.printer.end()
+            self.researcher.attach_printer(None)
+            self.printer = None
 
     async def run(self):
         """Run the data analysis pipeline."""
         logger.info(f"Running DataAgentPipeline with experiment_id: {self.experiment_id}")
         logger.info(f"Data path: {self.data_path}")
         logger.info(f"User prompt: {self.user_prompt}")
-        logger.info(f"Provider: {self.config_dict['provider']}, Model: {self.config.model_name}")
+        provider = (self.config_dict or {}).get('provider', 'unknown provider')
+        logger.info(f"Provider: {provider}, Model: {self.config.model_name}")
+
+        self._start_printer()
+        if self.printer:
+            self.printer.update_item(
+                "workflow",
+                f"Workflow: {self.workflow_name}",
+                is_done=True,
+                hide_checkmark=True,
+            )
+            self.printer.update_item("prepare_query", "Preparing research query...")
 
         trace_metadata = {
             "experiment_id": self.experiment_id,
@@ -184,59 +222,94 @@ class DataScientistPipeline(BasePipeline):
         }
         trace_context = trace(self.workflow_name, metadata=trace_metadata) if self.enable_tracing else nullcontext()
 
-        with trace_context:
-            # Create comprehensive research query that includes the task and data context
-            with self._span_context(
-                function_span,
-                name="prepare_research_query",
-                input=f"experiment_id={self.experiment_id}, data_path={self.data_path}, provider={self.config_dict['provider']}",
-            ) as span:
-                research_query = self._prepare_research_query()
-                if span and hasattr(span, "set_output"):
-                    span.set_output({"query_length": len(research_query)})
+        research_report = ""
 
-            # Run iterative research workflow with span
-            with self._span_context(
-                agent_span,
-                name=self.researcher.workflow_name,
-                tools=list(self.researcher.tool_agents.keys()),
-            ) as span:
-                research_report = await self.researcher.run(
-                    query=research_query,
-                    output_length="detailed analysis with code examples",
-                    output_instructions="Provide complete data science workflow with explanations, code, and results",
-                    background_context=f"Experiment: {self.experiment_id}, Dataset: {self.data_path}, Provider: {self.config_dict['provider']}, Model: {self.config.model_name}"
-                )
-                if span and hasattr(span, "set_output"):
-                    span.set_output({"report_preview": research_report[:200]})
+        try:
+            with trace_context:
+                # Create comprehensive research query that includes the task and data context
+                with self._span_context(
+                    function_span,
+                    name="prepare_research_query",
+                    input=f"experiment_id={self.experiment_id}, data_path={self.data_path}, provider={provider}",
+                ) as span:
+                    research_query = self._prepare_research_query()
+                    if span and hasattr(span, "set_output"):
+                        span.set_output({"query_length": len(research_query)})
+                    if self.printer:
+                        self.printer.update_item(
+                            "prepare_query",
+                            "Research query prepared",
+                            is_done=True,
+                        )
 
-            print("=== Final Analysis Report ===")
-            print(research_report)
+                if self.printer:
+                    self.printer.update_item("research", "Executing research workflow...")
+
+                # Run iterative research workflow with span
+                with self._span_context(
+                    agent_span,
+                    name=self.researcher.workflow_name,
+                    tools=list(self.researcher.tool_agents.keys()),
+                ) as span:
+                    research_report = await self.researcher.run(
+                        query=research_query,
+                        output_length="detailed analysis with code examples",
+                        output_instructions="Provide complete data science workflow with explanations, code, and results",
+                        background_context=(
+                            f"Experiment: {self.experiment_id}, Dataset: {self.data_path}, "
+                            f"Provider: {provider}, Model: {self.config.model_name}"
+                        ),
+                    )
+                    if span and hasattr(span, "set_output"):
+                        span.set_output({"report_preview": research_report[:200]})
+                    if self.printer:
+                        self.printer.update_item(
+                            "research",
+                            "Research workflow complete",
+                            is_done=True,
+                        )
+
+                if self.printer:
+                    self.printer.update_item("store_results", "Saving final results...")
+
+                # Store final results with span
+                with self._span_context(
+                    function_span,
+                    name="store_final_results",
+                    input=f"experiment_id={self.experiment_id}",
+                ) as span:
+                    self._store_final_results(research_report)
+                    if span and hasattr(span, "set_output"):
+                        span.set_output({"stored_bytes": len(research_report.encode('utf-8'))})
+                    if self.printer:
+                        self.printer.update_item(
+                            "store_results",
+                            "Final results saved",
+                            is_done=True,
+                        )
+
+            self._stop_printer()
+
+            self.console.print("=== Final Analysis Report ===")
+            self.console.print(research_report)
 
             if self.enable_tracing:
-                print("\n🎉 Example completed successfully!")
-                print("📈 Analysis complete - check the detailed report above")
-                print("🔍 Trace data has been captured for this pipeline execution")
-                print("   - Pipeline spans: initialization, research workflow, completion")
-                print("   - Research spans: observations, gap evaluation, agent selection, tool execution")
-                print("   - Individual agent execution spans for detailed analysis")
-
-            # Store final results with span
-            with self._span_context(
-                function_span,
-                name="store_final_results",
-                input=f"experiment_id={self.experiment_id}",
-            ) as span:
-                self._store_final_results(research_report)
-                if span and hasattr(span, "set_output"):
-                    span.set_output({"stored_bytes": len(research_report.encode('utf-8'))})
+                self.console.print("\n🎉 Example completed successfully!")
+                self.console.print("📈 Analysis complete - check the detailed report above")
+                self.console.print("🔍 Trace data has been captured for this pipeline execution")
+                self.console.print("   - Pipeline spans: initialization, research workflow, completion")
+                self.console.print("   - Research spans: observations, gap evaluation, agent selection, tool execution")
+                self.console.print("   - Individual agent execution spans for detailed analysis")
 
             logger.info("DataAgentPipeline completed successfully")
             return research_report
+        finally:
+            self._stop_printer()
 
 
     def _prepare_research_query(self) -> str:
         """Prepare the research query and store initial task information."""
+        provider = (self.config_dict or {}).get('provider', 'unknown provider')
         research_query = f"""
         Complete the following data science task:
 
@@ -260,7 +333,7 @@ class DataScientistPipeline(BasePipeline):
             {
                 "data_path": self.data_path,
                 "user_prompt": self.user_prompt,
-                "provider": self.config_dict['provider'],
+                "provider": provider,
                 "research_query": research_query,
                 "experiment_id": self.experiment_id
             },
@@ -296,7 +369,9 @@ class DataScientist:
         tracing: bool = False,
         config: Optional[LLMConfig] = None,
         trace_include_sensitive_data: bool = False,
-        workflow_name: Optional[str] = None
+        workflow_name: Optional[str] = None,
+        console: Optional[Console] = None,
+        status_printer: Optional[Printer] = None,
     ):
         self.max_iterations = max_iterations
         self.max_time_minutes = max_time_minutes
@@ -309,6 +384,9 @@ class DataScientist:
         self.trace_include_sensitive_data = trace_include_sensitive_data
         self.workflow_name = workflow_name or "data_researcher_workflow"
         self.config = config
+        self.console = console
+        self.status_printer = status_printer
+        self.constraint_reason: str = ""
 
         self.evaluate_agent = create_evaluate_agent(self.config)
         self.routing_agent = create_routing_agent(self.config)
@@ -320,6 +398,16 @@ class DataScientist:
         """Return a span context when manager tracing is enabled, else a no-op context."""
         return span_factory(**kwargs) if self.tracing else nullcontext()
 
+    def attach_printer(self, printer: Optional[Printer]) -> None:
+        """Attach or detach the live status printer used for progress updates."""
+        self.status_printer = printer
+
+    def _update_status(self, suffix: str, message: str, *, done: bool = False) -> None:
+        """Send a status update to the live printer if available."""
+        if self.status_printer:
+            item_id = f"research_{suffix}"
+            self.status_printer.update_item(item_id, message, is_done=done)
+
     async def run(
         self,
         query: str,
@@ -329,17 +417,22 @@ class DataScientist:
     ) -> str:
         """Run the deep research workflow for a given query."""
         self.start_time = time.time()
+        self.constraint_reason = ""
         self._log_message("=== Starting Data Research Workflow ===")
+        self._update_status("loop", "Starting research loop...")
+        self._update_status("iteration", "Preparing first iteration...")
 
         # Iterative research loop
         while self.should_continue and self._check_constraints():
             self.iteration += 1
             self._log_message(f"\n=== Starting Iteration {self.iteration} ===")
+            self._update_status("iteration", f"Iteration {self.iteration} in progress...")
 
             # Set up blank IterationData for this iteration
             self.conversation.add_iteration()
 
             # 1. Generate observations with a span (only if tracing enabled)
+            self._update_status("observe", f"Iteration {self.iteration}: generating observations...")
             with self._span_context(
                 agent_span,
                 name="observe_agent",
@@ -348,6 +441,7 @@ class DataScientist:
                 observations = await self._generate_observations(query, background_context=background_context)
                 if span and hasattr(span, "set_output"):
                     span.set_output({"preview": observations[:200]})
+            self._update_status("observe", f"Iteration {self.iteration}: observations captured", done=True)
 
             # 2. Evaluate current gaps in the research and capture span data
             with self._span_context(
@@ -385,10 +479,29 @@ class DataScientist:
                     results = await self._execute_tools(selection_plan.tasks)
                     if span and hasattr(span, "set_output"):
                         span.set_output({"completed_tasks": len(results)})
+                self._update_status("iteration", f"Iteration {self.iteration} complete", done=True)
             else:
                 self.should_continue = False
+                self._update_status(
+                    "plan",
+                    "Knowledge gaps resolved; no routing required",
+                    done=True,
+                )
+                self._update_status(
+                    "tools",
+                    "Knowledge gaps resolved; no tool execution required",
+                    done=True,
+                )
+                self._update_status(
+                    "iteration",
+                    f"Iteration {self.iteration}: objectives satisfied",
+                    done=True,
+                )
 
         self._log_message("=== DataResearcher Marked As Complete - Finalizing Output ===")
+        completion_note = self.constraint_reason or "Research objectives satisfied"
+        self._update_status("loop", f"Research loop complete ({completion_note})", done=True)
+        self._update_status("iteration", f"Iterations executed: {self.iteration}", done=True)
 
         # Create final report with function span
         with self._span_context(
@@ -396,9 +509,11 @@ class DataScientist:
             name="writer_agent",
             output_type="final_report",
         ) as span:
+            self._update_status("writer", "Compiling final report...")
             report = await self._create_final_report(query, length=output_length, instructions=output_instructions)
             if span and hasattr(span, "set_output"):
                 span.set_output({"report_length": len(report)})
+        self._update_status("writer", "Final report ready", done=True)
 
         elapsed_time = time.time() - self.start_time
         self._log_message(f"DataResearcher completed in {int(elapsed_time // 60)} minutes and {int(elapsed_time % 60)} seconds after {self.iteration} iterations.")
@@ -410,12 +525,14 @@ class DataScientist:
         if self.iteration >= self.max_iterations:
             self._log_message("\n=== Ending Research Loop ===")
             self._log_message(f"Reached maximum iterations ({self.max_iterations})")
+            self.constraint_reason = f"Reached maximum iterations ({self.max_iterations})"
             return False
 
         elapsed_minutes = (time.time() - self.start_time) / 60
         if elapsed_minutes >= self.max_time_minutes:
             self._log_message("\n=== Ending Research Loop ===")
             self._log_message(f"Reached maximum time ({self.max_time_minutes} minutes)")
+            self.constraint_reason = f"Reached maximum time ({self.max_time_minutes} minutes)"
             return False
 
         return True
@@ -429,6 +546,7 @@ class DataScientist:
 
         background = f"BACKGROUND CONTEXT:\n{background_context}" if background_context else ""
 
+        self._update_status("evaluate", f"Iteration {self.iteration}: evaluating knowledge gaps...")
         input_str = f"""
         Current Iteration Number: {self.iteration}
         Time Elapsed: {(time.time() - self.start_time) / 60:.2f} minutes of maximum {self.max_time_minutes} minutes
@@ -450,6 +568,13 @@ class DataScientist:
             self.conversation.set_latest_gap(next_gap)
             self._log_message(f"<task>\nAddress this knowledge gap: {next_gap}\n</task>")
 
+        outstanding = len(evaluation.outstanding_gaps)
+        if outstanding:
+            message = f"Iteration {self.iteration}: evaluation complete — {outstanding} gap(s) remaining"
+        else:
+            message = f"Iteration {self.iteration}: evaluation complete — no gaps remaining"
+        self._update_status("evaluate", message, done=True)
+
         return evaluation
 
     async def _select_agents(
@@ -462,6 +587,7 @@ class DataScientist:
 
         background = f"BACKGROUND CONTEXT:\n{background_context}" if background_context else ""
 
+        self._update_status("plan", f"Iteration {self.iteration}: planning tool usage...")
         input_str = f"""
         ORIGINAL QUERY:
         {query}
@@ -486,6 +612,10 @@ class DataScientist:
         joined_calls = '\n'.join(self.conversation.history[-1].tool_calls)
         self._log_message(f"<action>\nCalling the following tools to address the knowledge gap:\n{joined_calls}\n</action>")
 
+        task_count = len(selection_plan.tasks)
+        message = f"Iteration {self.iteration}: planned {task_count} tool task(s)"
+        self._update_status("plan", message, done=True)
+
         return selection_plan
 
     async def _execute_tools(self, tasks: List[AgentTask]) -> Dict[str, ToolAgentOutput]:
@@ -498,11 +628,22 @@ class DataScientist:
         # Run all tasks concurrently
         num_completed = 0
         results = {}
+        total_tasks = len(async_tasks)
+
+        if total_tasks == 0:
+            self._update_status("tools", f"Iteration {self.iteration}: no tool executions required", done=True)
+            return results
+
+        self._update_status("tools", f"Iteration {self.iteration}: executing tools 0/{total_tasks}")
         for future in asyncio.as_completed(async_tasks):
             gap, agent_name, result = await future
             results[f"{agent_name}_{gap}"] = result
             num_completed += 1
             self._log_message(f"<processing>\nTool execution progress: {num_completed}/{len(async_tasks)}\n</processing>")
+            self._update_status(
+                "tools",
+                f"Iteration {self.iteration}: executing tools {num_completed}/{total_tasks}",
+            )
 
         # Add findings from the tool outputs to the conversation
         findings = []
@@ -512,6 +653,7 @@ class DataScientist:
 
         joined_findings = '\n\n'.join(findings)
         self._log_message(f"<findings>\n{joined_findings}\n</findings>")
+        self._update_status("tools", f"Iteration {self.iteration}: tool execution complete", done=True)
 
         return results
 
@@ -606,4 +748,7 @@ class DataScientist:
     def _log_message(self, message: str) -> None:
         """Log a message if verbose is True"""
         if self.verbose:
-            print(message)
+            if self.console:
+                self.console.print(message)
+            else:
+                print(message)

@@ -9,5 +9,6 @@ dependencies = [
     "litellm==1.76",
     "loguru>=0.7.3",
     "openai-agents>=0.3.2",
+    "rich>=14.1.0",
     "weave>=0.52.8",
 ]
