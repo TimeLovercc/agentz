@@ -8,6 +8,11 @@ from dotenv import load_dotenv
 from rich.console import Console
 
 from agents.tracing.create import trace
+from agentz.configuration.base import (
+    ConfigResolver,
+    PipelineConfigSource,
+    ResolvedPipelineConfig,
+)
 from agentz.llm.llm_setup import LLMConfig
 from agentz.utils import Printer, load_config
 from pydantic import BaseModel, Field
@@ -19,7 +24,9 @@ class BasePipeline:
     def __init__(
         self,
         *,
-        config_file: str,
+        config_file: Optional[str] = None,
+        config_source: Optional[PipelineConfigSource] = None,
+        config_resolver: Optional[ConfigResolver] = None,
         data_path: Optional[str] = None,
         user_prompt: Optional[str] = None,
         overrides: Optional[Dict[str, Any]] = None,
@@ -31,6 +38,8 @@ class BasePipeline:
 
         Args:
             config_file: Path to the configuration file (YAML/JSON).
+            config_source: Alternative configuration input (dict, config object, path).
+            config_resolver: Optional resolver used when `config_source` is supplied.
             data_path: Optional dataset path for this run; overrides config value.
             user_prompt: Optional user prompt; overrides config value.
             overrides: Optional dictionary merged into the loaded config for
@@ -46,24 +55,47 @@ class BasePipeline:
         self.console = Console()
         self._printer: Optional[Printer] = None
 
-        # Load full configuration and apply overrides
-        if not config_file:
-            raise ValueError("'config_file' is required to initialize a pipeline")
+        resolved_config: Optional[ResolvedPipelineConfig] = None
 
-        raw_config = load_config(config_file)
-        config_data: Dict[str, Any] = deepcopy(raw_config)
+        if config_source is not None:
+            if config_resolver is None:
+                raise ValueError(
+                    "'config_resolver' must be provided when using 'config_source'"
+                )
+            resolved_config = config_resolver(config_source)
+        elif config_file is not None:
+            if config_resolver is not None:
+                resolved_config = config_resolver(config_file)
+            else:
+                raw_config = load_config(config_file)
+                resolved_config = ResolvedPipelineConfig(
+                    config_dict=dict(raw_config),
+                    source_path=config_file,
+                )
+        else:
+            raise ValueError(
+                "Either 'config_file' or 'config_source' must be provided to initialize a pipeline"
+            )
+
+        resolved_clone = resolved_config.copy()
+        base_config = deepcopy(resolved_clone.config_dict)
         if overrides:
-            config_data = _deep_merge_dicts(config_data, overrides)
+            config_data = _deep_merge_dicts(base_config, overrides)
+        else:
+            config_data = base_config
 
-        self.config_file = config_file
+        self._resolved_config = resolved_clone
         self.full_config = config_data
+        inferred_path = resolved_clone.source_path or config_file or "<inline>"
+        self.config_file = inferred_path
+        self._resolved_config.source_path = inferred_path
 
         # Build LLM configuration from merged settings
-        provider = self.full_config.get('provider')
+        provider = self.full_config.get("provider")
         if not provider:
             raise ValueError("Configuration missing required field 'provider'")
 
-        api_key = self.full_config.get('api_key')
+        api_key = self.full_config.get("api_key")
         if not api_key:
             api_key = self._get_api_key_from_env(provider)
 
@@ -74,7 +106,13 @@ class BasePipeline:
             "provider": provider,
             "api_key": api_key,
         }
-        for optional_key in ("model", "base_url", "model_settings", "azure_config", "aws_config"):
+        for optional_key in (
+            "model",
+            "base_url",
+            "model_settings",
+            "azure_config",
+            "aws_config",
+        ):
             if optional_key in self.full_config:
                 config_dict[optional_key] = self.full_config[optional_key]
 
@@ -82,25 +120,38 @@ class BasePipeline:
         self.config = LLMConfig(self.config_dict, self.full_config)
 
         # Persist frequently used fields
-        existing_data_section = self.full_config.get('data')
+        existing_data_section = self.full_config.get("data")
         data_section = existing_data_section if isinstance(existing_data_section, dict) else {}
-        self.data_path = data_path or data_section.get('path')
-        self.user_prompt = user_prompt or self.full_config.get('user_prompt') or data_section.get('prompt')
+        self.data_path = data_path or data_section.get("path")
+        self.user_prompt = (
+            user_prompt
+            or self.full_config.get("user_prompt")
+            or data_section.get("prompt")
+        )
 
         if self.data_path:
-            if not isinstance(self.full_config.get('data'), dict):
-                self.full_config['data'] = {}
-            self.full_config['data']['path'] = self.data_path
+            if not isinstance(self.full_config.get("data"), dict):
+                self.full_config["data"] = {}
+            self.full_config["data"]["path"] = self.data_path
         if self.user_prompt:
-            self.full_config['user_prompt'] = self.user_prompt
+            self.full_config["user_prompt"] = self.user_prompt
 
     @property
     def provider_name(self) -> str:
-        return (self.config_dict or {}).get('provider', 'unknown provider')
+        return (self.config_dict or {}).get("provider", "unknown provider")
 
     @property
     def printer(self) -> Optional[Printer]:
         return self._printer
+
+    @property
+    def config_object(self):
+        return getattr(self._resolved_config, "config_object", None)
+
+    @property
+    def config_attachments(self) -> Dict[str, Any]:
+        attachments = getattr(self._resolved_config, "attachments", None)
+        return attachments if attachments is not None else {}
 
     def start_printer(self) -> Printer:
         if self._printer is None:
@@ -139,7 +190,9 @@ class BasePipeline:
 
         api_key = os.getenv(env_var)
         if not api_key:
-            raise ValueError(f"API key not found. Set {env_var} in environment or .env file.")
+            raise ValueError(
+                f"API key not found. Set {env_var} in environment or .env file."
+            )
 
         return api_key
 
@@ -193,7 +246,11 @@ class Conversation(BaseModel):
             self.history[-1].thought = thought
 
     def get_all_findings(self) -> List[str]:
-        return [finding for iteration_data in self.history for finding in iteration_data.findings]
+        return [
+            finding
+            for iteration_data in self.history
+            for finding in iteration_data.findings
+        ]
 
     def compile_conversation_history(self) -> str:
         """Compile the conversation history into a string."""
@@ -204,7 +261,9 @@ class Conversation(BaseModel):
             if iteration_data.thought:
                 conversation += f"<thought>\n{iteration_data.thought}\n</thought>\n\n"
             if iteration_data.gap:
-                conversation += f"<task>\nAddress this knowledge gap: {iteration_data.gap}\n</task>\n\n"
+                conversation += (
+                    f"<task>\nAddress this knowledge gap: {iteration_data.gap}\n</task>\n\n"
+                )
             if iteration_data.tool_calls:
                 joined_calls = "\n".join(iteration_data.tool_calls)
                 conversation += (
