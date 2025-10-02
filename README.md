@@ -53,8 +53,20 @@ pipe.run_sync()
 
 ## Installation
 
+This project uses [uv](https://docs.astral.sh/uv/) for package management. If you don't have uv installed:
+
 ```bash
-pip install -r requirements.txt
+# Install uv (macOS/Linux)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Or via pip
+pip install uv
+```
+
+Then sync dependencies:
+
+```bash
+uv sync
 ```
 
 ## Building Your Own System
