@@ -14,7 +14,7 @@ from agentz.agents.manager_agents.evaluate_agent import create_evaluate_agent, K
 from agentz.agents.manager_agents.observe_agent import create_observe_agent
 from agentz.agents.manager_agents.routing_agent import create_routing_agent, AgentTask, AgentSelectionPlan
 from agentz.agents.manager_agents.writer_agent import create_writer_agent
-from agentz.agents.manager_agents.tool_agents import init_tool_agents, ToolAgentOutput
+from agentz.agents.worker_agents.tool_agents import init_tool_agents, ToolAgentOutput
 from agentz.memory.global_memory import global_memory
 from agentz.utils import get_experiment_timestamp
 from agentz.llm.llm_setup import LLMConfig
@@ -131,8 +131,8 @@ class DataScientistPipeline(BasePipeline):
 
         # Get pipeline settings from config file if available
         pipeline_settings = {}
-        if self.full_config:
-            pipeline_settings = self.full_config.get('pipeline', {})
+        if self.config.full_config:
+            pipeline_settings = self.config.full_config.get('pipeline', {})
 
         # Initialize data researcher with tracing configuration and config settings
         self.researcher = DataScientist(
@@ -141,7 +141,6 @@ class DataScientistPipeline(BasePipeline):
             verbose=pipeline_settings.get('verbose', True),
             tracing=enable_tracing,
             config=self.config,
-            full_config=self.full_config,
             trace_include_sensitive_data=trace_include_sensitive_data,
             workflow_name=f"researcher_{self.experiment_id}"
         )
@@ -296,7 +295,6 @@ class DataScientist:
         verbose: bool = True,
         tracing: bool = False,
         config: Optional[LLMConfig] = None,
-        full_config: Optional[dict] = None,
         trace_include_sensitive_data: bool = False,
         workflow_name: Optional[str] = None
     ):
@@ -311,13 +309,12 @@ class DataScientist:
         self.trace_include_sensitive_data = trace_include_sensitive_data
         self.workflow_name = workflow_name or "data_researcher_workflow"
         self.config = config
-        self.full_config = full_config
 
-        self.evaluate_agent = create_evaluate_agent(self.config, self.full_config)
-        self.routing_agent = create_routing_agent(self.config, self.full_config)
-        self.observe_agent = create_observe_agent(self.config, self.full_config)
-        self.writer_agent = create_writer_agent(self.config, self.full_config)
-        self.tool_agents = init_tool_agents(self.config, self.full_config)
+        self.evaluate_agent = create_evaluate_agent(self.config)
+        self.routing_agent = create_routing_agent(self.config)
+        self.observe_agent = create_observe_agent(self.config)
+        self.writer_agent = create_writer_agent(self.config)
+        self.tool_agents = init_tool_agents(self.config)
 
     def _span_context(self, span_factory, **kwargs):
         """Return a span context when manager tracing is enabled, else a no-op context."""

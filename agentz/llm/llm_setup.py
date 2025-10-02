@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import os
 
 from agents import (
@@ -59,7 +59,7 @@ PROVIDER_CONFIGS = {
 class LLMConfig:
     """Direct configuration system - no environment variables."""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], full_config: Optional[Dict[str, Any]] = None):
         """
         Initialize LLM configuration from direct config.
 
@@ -72,11 +72,13 @@ class LLMConfig:
                 - azure_config: dict (for Azure OpenAI)
                 - aws_config: dict (for Bedrock)
                 - model_settings: dict (optional, for temperature etc.)
+            full_config: Optional full configuration including agent prompts, pipeline settings
         """
         self.provider = config["provider"]
         self.api_key = config["api_key"]
         self.model_name = config.get("model", self._get_default_model())
         self.config = config
+        self.full_config = full_config
 
         # Validate provider
         if self.provider not in PROVIDER_CONFIGS:

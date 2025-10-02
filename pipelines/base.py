@@ -47,14 +47,14 @@ class BasePipeline:
         self.trace_include_sensitive_data = trace_include_sensitive_data
 
         # Load full config from file if provided
-        self.full_config = None
+        full_config = None
         if config_file:
-            self.full_config = load_config(config_file)
+            full_config = load_config(config_file)
             # Extract provider config from full config
-            provider = provider or self.full_config.get('provider')
-            model = model or self.full_config.get('model')
-            api_key = api_key or self.full_config.get('api_key')
-            base_url = base_url or self.full_config.get('base_url')
+            provider = provider or full_config.get('provider')
+            model = model or full_config.get('model')
+            api_key = api_key or full_config.get('api_key')
+            base_url = base_url or full_config.get('base_url')
 
         # Build config from parameters or use provided config_dict
         if llm_config:
@@ -62,7 +62,7 @@ class BasePipeline:
             self.config_dict = llm_config.config
         elif config_dict:
             self.config_dict = config_dict
-            self.config = LLMConfig(config_dict)
+            self.config = LLMConfig(config_dict, full_config)
         else:
             # Auto-build config from parameters
             if not provider:
@@ -81,7 +81,7 @@ class BasePipeline:
             if base_url:
                 self.config_dict["base_url"] = base_url
 
-            self.config = LLMConfig(self.config_dict)
+            self.config = LLMConfig(self.config_dict, full_config)
 
         # Tracing is automatically set up in LLMConfig for OpenAI provider
 
