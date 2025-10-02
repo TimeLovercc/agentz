@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from loguru import logger
 
@@ -21,8 +21,10 @@ from agentz.agents.manager_agents.writer_agent import create_writer_agent
 from agentz.agents.worker_agents.tool_agents import init_tool_agents
 from agentz.configuration.base import PipelineConfigSource
 from agentz.configuration.data_science import (
+    ManagerAgentInput,
     instantiate_agent_spec,
     instantiate_tool_agent_spec,
+    normalise_manager_agent_specs,
     resolve_data_science_config,
 )
 from agentz.memory.global_memory import global_memory
@@ -40,8 +42,9 @@ class DataScientistPipeline(BasePipeline):
         *,
         config: Optional[PipelineConfigSource] = None,
         config_file: Optional[str] = None,
-        data_path: str,
-        user_prompt: str,
+        data_path: Optional[str] = None,
+        user_prompt: Optional[str] = None,
+        agents: Optional[ManagerAgentInput] = None,
         workflow_name: Optional[str] = None,
         overrides: Optional[Dict[str, Any]] = None,
         enable_tracing: bool = True,
@@ -53,8 +56,10 @@ class DataScientistPipeline(BasePipeline):
         Args:
             config: Configuration object, mapping, or path resolving to pipeline settings.
             config_file: Backwards compatible path to configuration file.
-            data_path: Location of the dataset to analyse for this run.
-            user_prompt: Description of the task provided by the user.
+            data_path: Optional dataset path for this run; falls back to config value.
+            user_prompt: Optional task description; falls back to config value.
+            agents: Optional manager agent overrides provided either as a mapping
+                or a list in (evaluate, routing, observe, writer) order.
             workflow_name: Optional custom name used when tracing spans.
             overrides: Optional dictionary merged into the loaded config for
                 ad-hoc adjustments.
@@ -65,6 +70,10 @@ class DataScientistPipeline(BasePipeline):
             raise ValueError("Provide either 'config' or 'config_file', not both")
 
         config_source: PipelineConfigSource
+        self._direct_manager_agent_specs = (
+            normalise_manager_agent_specs(agents) if agents is not None else {}
+        )
+
         if config is not None:
             config_source = config
         else:
@@ -140,6 +149,11 @@ class DataScientistPipeline(BasePipeline):
         )
 
     def _resolve_manager_agent(self, name: str, factory):
+        if name in self._direct_manager_agent_specs:
+            return instantiate_agent_spec(
+                self._direct_manager_agent_specs[name], self.config
+            )
+
         overrides = self.config_attachments.get("manager_agents", {})
         if name in overrides:
             return instantiate_agent_spec(overrides[name], self.config)

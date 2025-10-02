@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Mapping, Optional, Union
+from collections.abc import Mapping, Sequence
+from typing import Any, Callable, Dict, Optional, Union
 
 from pydantic import ConfigDict, Field
 
@@ -25,6 +26,43 @@ except Exception:  # pragma: no cover
 
 AgentFactory = Union[Agent, Callable[[LLMConfig], Agent]]  # type: ignore[misc]
 ToolFactory = Union[Any, Callable[[LLMConfig], Any]]  # type: ignore[misc]
+ManagerAgentInput = Union[Sequence[AgentFactory], Mapping[str, AgentFactory]]
+
+MANAGER_AGENT_ORDER = (
+    "evaluate_agent",
+    "routing_agent",
+    "observe_agent",
+    "writer_agent",
+)
+
+
+def normalise_manager_agent_specs(
+    agents: ManagerAgentInput,
+) -> Dict[str, AgentFactory]:
+    """Convert manager agent overrides into a validated mapping."""
+
+    if isinstance(agents, Mapping):
+        invalid = set(agents.keys()) - set(MANAGER_AGENT_ORDER)
+        if invalid:
+            invalid_list = ", ".join(sorted(invalid))
+            raise ValueError(
+                "Unknown manager agent names provided: " f"{invalid_list}"
+            )
+        return {name: agents[name] for name in MANAGER_AGENT_ORDER if name in agents}
+
+    if isinstance(agents, Sequence) and not isinstance(agents, (str, bytes)):
+        agent_list = list(agents)
+        expected_len = len(MANAGER_AGENT_ORDER)
+        if len(agent_list) != expected_len:
+            raise ValueError(
+                "Expected a sequence of four agents in the order "
+                "(evaluate, routing, observe, writer)"
+            )
+        return dict(zip(MANAGER_AGENT_ORDER, agent_list))
+
+    raise TypeError(
+        "manager agent overrides must be provided as a mapping or sequence"
+    )
 
 
 class DataScienceConfig(PipelineConfigBase):
@@ -42,6 +80,9 @@ class DataScienceConfig(PipelineConfigBase):
     tool_agents: Dict[str, Any] = Field(default_factory=dict)
     agent_factories: Dict[str, AgentFactory] = Field(default_factory=dict, exclude=True)
     tool_agent_factories: Dict[str, ToolFactory] = Field(default_factory=dict, exclude=True)
+    manager_agent_specs: Optional[ManagerAgentInput] = Field(
+        default=None, alias="manager_agents", exclude=True
+    )
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -56,8 +97,16 @@ class DataScienceConfig(PipelineConfigBase):
         )
 
         attachments: Dict[str, Any] = {}
+
+        manager_overrides: Dict[str, AgentFactory] = {}
+        if self.manager_agent_specs is not None:
+            manager_overrides.update(
+                normalise_manager_agent_specs(self.manager_agent_specs)
+            )
         if self.agent_factories:
-            attachments["manager_agents"] = dict(self.agent_factories)
+            manager_overrides.update(self.agent_factories)
+        if manager_overrides:
+            attachments["manager_agents"] = dict(manager_overrides)
         if self.tool_agent_factories:
             attachments["tool_agents"] = dict(self.tool_agent_factories)
 
@@ -75,9 +124,18 @@ class DataScienceConfig(PipelineConfigBase):
     def from_path(cls, path: str) -> "DataScienceConfig":
         return cls.from_file(path)
 
-    def with_manager_agents(self, **agents: AgentFactory) -> "DataScienceConfig":
+    def with_manager_agents(
+        self,
+        agents: Optional[ManagerAgentInput] = None,
+        **named_agents: AgentFactory,
+    ) -> "DataScienceConfig":
         new_config = self.model_copy(deep=True)
-        new_config.agent_factories.update(agents)
+        overrides: Dict[str, AgentFactory] = {}
+        if agents is not None:
+            overrides.update(normalise_manager_agent_specs(agents))
+        if named_agents:
+            overrides.update(named_agents)
+        new_config.agent_factories.update(overrides)
         return new_config
 
     def with_tool_agents(self, **agents: ToolFactory) -> "DataScienceConfig":
@@ -122,7 +180,10 @@ def instantiate_tool_agent_spec(spec: ToolFactory, config: LLMConfig) -> Any:
 __all__ = [
     "AgentFactory",
     "DataScienceConfig",
+    "ManagerAgentInput",
+    "MANAGER_AGENT_ORDER",
     "instantiate_agent_spec",
     "instantiate_tool_agent_spec",
+    "normalise_manager_agent_specs",
     "resolve_data_science_config",
 ]
