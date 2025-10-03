@@ -6,6 +6,7 @@ from loguru import logger
 
 from agents import Agent
 from agentz.llm.llm_setup import LLMConfig
+from agentz.agents.registry import register_agent
 
 
 class AgentTask(BaseModel):
@@ -22,6 +23,7 @@ class AgentSelectionPlan(BaseModel):
     reasoning: str = Field(description="Reasoning for the agent selection", default="")
 
 
+@register_agent("routing_agent", aliases=["routing"])
 def create_routing_agent(config: LLMConfig) -> Agent:
     """Create a routing agent using OpenAI Agents SDK.
 

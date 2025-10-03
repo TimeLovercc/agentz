@@ -2,7 +2,6 @@
 
 from agents import Agent
 
-from agentz.agents.base import DefaultAgentOutput
 from pipelines.data_scientist import DataScientistPipeline
 
 DATA_PATH = "data/banana_quality.csv"
@@ -19,7 +18,6 @@ EVALUATE_AGENT = Agent(
         "Review research progress with an emphasis on data readiness, model risk, and "
         "missing validation steps. Respond using the KnowledgeGapOutput schema in JSON."
     ),
-    output_type=DefaultAgentOutput,
 )
 
 ROUTING_AGENT = Agent(
@@ -29,7 +27,6 @@ ROUTING_AGENT = Agent(
         "and evaluation steps are scheduled before model retraining. Reply as JSON that "
         "conforms to AgentSelectionPlan."
     ),
-    output_type=DefaultAgentOutput,
 )
 
 OBSERVE_AGENT = Agent(
@@ -38,7 +35,6 @@ OBSERVE_AGENT = Agent(
         "Summarise iteration progress, highlight risks, and note pending follow-up items "
         "before the next iteration begins."
     ),
-    output_type=DefaultAgentOutput,
 )
 
 WRITER_AGENT = Agent(
@@ -47,7 +43,6 @@ WRITER_AGENT = Agent(
         "Compile research results into a cohesive markdown report including context, "
         "analysis, and recommended follow-ups."
     ),
-    output_type=DefaultAgentOutput,
 )
 
 # Configuration with custom manager agents via config dict

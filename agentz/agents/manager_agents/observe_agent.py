@@ -4,8 +4,10 @@ from loguru import logger
 
 from agents import Agent
 from agentz.llm.llm_setup import LLMConfig
+from agentz.agents.registry import register_agent
 
 
+@register_agent("observe_agent", aliases=["observe"])
 def create_observe_agent(config: LLMConfig) -> Agent:
     """Create an observation agent using OpenAI Agents SDK.
 

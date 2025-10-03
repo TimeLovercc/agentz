@@ -4,9 +4,10 @@ from loguru import logger
 
 from agents import Agent
 from agentz.llm.llm_setup import LLMConfig
-from agentz.agents.worker_agents.tool_agents import ToolAgentOutput
+from agentz.agents.registry import register_agent, ToolAgentOutput
 
 
+@register_agent("model_training_agent", aliases=["model_training", "train"])
 def create_model_training_agent(config: LLMConfig) -> Agent:
     """Create a model training agent using OpenAI Agents SDK.
 

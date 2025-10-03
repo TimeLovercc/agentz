@@ -6,7 +6,7 @@ from loguru import logger
 
 from agents import Runner
 from agents.tracing.create import agent_span
-from agentz.agents.base import create_agents
+from agentz.agents.registry import create_agents
 from agentz.memory.global_memory import global_memory
 from pipelines.base import BasePipeline, with_run_context
 

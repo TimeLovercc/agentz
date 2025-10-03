@@ -4,9 +4,10 @@ from loguru import logger
 
 from agents import Agent
 from agentz.llm.llm_setup import LLMConfig
-from agentz.agents.worker_agents.tool_agents import ToolAgentOutput
+from agentz.agents.registry import register_agent, ToolAgentOutput
 
 
+@register_agent("visualization_agent", aliases=["visualization", "viz"])
 def create_visualization_agent(config: LLMConfig) -> Agent:
     """Create a visualization agent using OpenAI Agents SDK.
 

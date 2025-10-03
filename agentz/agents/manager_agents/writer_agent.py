@@ -4,8 +4,10 @@ from loguru import logger
 
 from agents import Agent
 from agentz.llm.llm_setup import LLMConfig
+from agentz.agents.registry import register_agent
 
 
+@register_agent("writer_agent", aliases=["writer"])
 def create_writer_agent(config: LLMConfig) -> Agent:
     """Create a writer agent using OpenAI Agents SDK.
 

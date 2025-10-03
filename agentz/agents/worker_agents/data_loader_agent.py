@@ -4,9 +4,10 @@ from loguru import logger
 
 from agents import Agent
 from agentz.llm.llm_setup import LLMConfig
-from agentz.agents.worker_agents.tool_agents import ToolAgentOutput
+from agentz.agents.registry import register_agent, ToolAgentOutput
 
 
+@register_agent("data_loader_agent", aliases=["data_loader"])
 def create_data_loader_agent(config: LLMConfig) -> Agent:
     """Create a data loader agent using OpenAI Agents SDK.
 

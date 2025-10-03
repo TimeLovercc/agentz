@@ -6,6 +6,7 @@ from loguru import logger
 
 from agents import Agent
 from agentz.llm.llm_setup import LLMConfig
+from agentz.agents.registry import register_agent
 
 
 class KnowledgeGapOutput(BaseModel):
@@ -15,6 +16,7 @@ class KnowledgeGapOutput(BaseModel):
     reasoning: str = Field(description="Reasoning behind the evaluation", default="")
 
 
+@register_agent("evaluate_agent", aliases=["evaluate"])
 def create_evaluate_agent(config: LLMConfig) -> Agent:
     """Create an evaluation agent using OpenAI Agents SDK.
 

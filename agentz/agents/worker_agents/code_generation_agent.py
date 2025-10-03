@@ -4,9 +4,10 @@ from loguru import logger
 
 from agents import Agent
 from agentz.llm.llm_setup import LLMConfig
-from agentz.agents.worker_agents.tool_agents import ToolAgentOutput
+from agentz.agents.registry import register_agent, ToolAgentOutput
 
 
+@register_agent("code_generation_agent", aliases=["code_generation", "codegen"])
 def create_code_generation_agent(config: LLMConfig) -> Agent:
     """Create a code generation agent using OpenAI Agents SDK.
 
