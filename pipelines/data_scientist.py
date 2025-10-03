@@ -50,13 +50,13 @@ class DataScientistPipeline(BasePipeline):
             if not evaluation.research_complete:
                 next_gap = evaluation.outstanding_gaps[0]
                 selection_plan = await self._route_tasks(next_gap, query)
-                result = await self._execute_tools(selection_plan)
+                results = await self._execute_tools(selection_plan.tasks)
                 
             else:
                 logger.info(f"Research marked complete by evaluation agent at iteration {iteration_num}")
                 self.should_continue = False
 
-        research_report = await self._create_final_report()
+        research_report = await self._create_final_report(query)
 
         self.update_printer("research", "Research workflow complete", is_done=True)
         logger.info("Research workflow completed")
