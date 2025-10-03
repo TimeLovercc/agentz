@@ -296,7 +296,7 @@ class BasePipeline:
             return span_factory(**kwargs)
         return nullcontext()
 
-    async def run_agent_with_span(
+    async def agent_step(
         self,
         agent,
         instructions: str,
