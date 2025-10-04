@@ -1,60 +1,57 @@
+<div align="center">
+
 # AgentZ: Agent from Zero
 
 **A Research-Oriented Multi-Agent System Platform**
 
-AgentZ is a minimal, extensible codebase designed for multi-agent systems research. It provides a comparative baseline and powerful foundation for building intelligent agent workflows with minimal code.
+</div>
 
-## Why AgentZ?
+AgentZ is a minimal, extensible codebase for multi-agent systems research. Build intelligent agent workflows with minimal code while achieving strong baseline performance. The platform enables autonomous reasoning, experience learning, and dynamic tool creation - providing both a comparative baseline and production-ready foundation for multi-agent research.
 
-### 🎯 Simple
-- **Minimal Pipeline Implementation**: Build new systems with just a few lines of code
-- **Easy Agent Integration**: Add your own agents without modifying core architecture
-- **Config-Driven**: Change behavior through simple configuration files
+## Features
 
-### 🧠 Intelligent
-- **Design Agent**: Automatically handles prompt engineering and architecture design
-- **Self-Optimizing**: Intelligent agents learn and improve from interactions
-- **Autonomous Reasoning**: Built-in cognitive capabilities for complex tasks
+- **🎯 Minimal Implementation** - Build new systems with just a few lines of code
+- **🔄 Stateful Workflows** - Persistent memory and object management throughout agent lifecycle
+- **📚 Experience Learning** - Agents improve over time through memory-based reasoning
+- **🛠️ Dynamic Tool Creation** - Agents can generate and use custom tools on-demand
+- **🧠 Autonomous Reasoning** - Built-in cognitive capabilities for complex multi-step tasks
+- **⚙️ Config-Driven** - Easily modify behavior through configuration files
 
-### ⚡ Easy-to-Use
-- **Powerful Base Implementation**: Strong default performance out-of-the-box
-- **Minimal Modifications Needed**: Achieve good results without extensive tuning
-- **Clean API**: Intuitive interfaces for common research tasks
+## Installation
 
-## Core Features
+This project uses [uv](https://docs.astral.sh/uv/) for fast, reliable package management.
 
-### 🔄 Persistence Process
-Keep and modify objects in memory throughout the agent lifecycle, enabling stateful workflows and continuous learning.
+### Install uv
 
-### 📚 Experience Learning
-Agents learn from past experiences, improving performance over time through memory-based reasoning and pattern recognition.
+```bash
+# macOS/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-### 🛠️ Tool Design
-Easily integrate new tools through code generation capabilities. Agents can dynamically create and use custom tools as needed.
+# Or via pip
+pip install uv
+```
 
-### 🚀 Coming Soon
-- **Workflow RAG**: Retrieval-augmented generation for complex workflows
-- **MCPs**: Model Context Protocol support for enhanced agent communication
+See the [uv installation guide](https://docs.astral.sh/uv/getting-started/installation/) for more options.
+
+### Setup Environment
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/agentz.git
+cd agentz
+
+# Sync dependencies
+uv sync
+```
 
 ## Quick Start
 
 ```python
 from pipelines.data_scientist import DataScientistPipeline
 
-pipe = DataScientistPipeline(
-    data_path="data/banana_quality.csv",
-    user_prompt="Build a model to classify banana quality as good or bad based on their numerical information about bananas of different quality (size, weight, sweetness, softness, harvest time, ripeness, and acidity). We have uploaded the entire dataset for you here in the banana_quality.csv file.",
-    model="gemini-2.5-flash",
-    config_file="agentx/configs/gemini.json",
-)
+pipe = DataScientistPipeline("pipelines/configs/data_science.yaml")
 
 pipe.run_sync()
-```
-
-## Installation
-
-```bash
-pip install -r requirements.txt
 ```
 
 ## Building Your Own System
@@ -66,9 +63,12 @@ Inherit from `BasePipeline` to create your own agent workflow:
 ```python
 from pipelines.base import BasePipeline
 
+
 class MyCustomPipeline(BasePipeline):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    DEFAULT_CONFIG_PATH = "pipelines/configs/my_pipeline.yaml"
+
+    def __init__(self, config=None):
+        super().__init__(config)
         # Add your custom initialization
 
     async def run(self):
@@ -137,29 +137,29 @@ AgentZ has been verified on several benchmarks for multi-agent research:
 
 *Detailed benchmark results and comparisons coming soon.*
 
+## Roadmap
+
+- [x] Persistence Process - Stateful agent workflows
+- [x] Experience Learning - Memory-based reasoning
+- [x] Tool Design - Dynamic tool creation
+- [ ] Workflow RAG - Retrieval-augmented generation for complex workflows
+- [ ] MCPs - Model Context Protocol support for enhanced agent communication
+
 ## Key Design Principles
 
-1. **Minimal Core**: Keep the base system simple and extensible
-2. **Intelligent Defaults**: Provide strong baseline implementations
-3. **Research-First**: Design for experimentation and comparison
-4. **Modular Architecture**: Easy to swap components and test variations
-5. **Production-Ready**: Scale from research prototypes to deployed systems
+1. **Minimal Core** - Keep the base system simple and extensible
+2. **Intelligent Defaults** - Provide strong baseline implementations
+3. **Research-First** - Design for experimentation and comparison
+4. **Modular Architecture** - Easy to swap components and test variations
+5. **Production-Ready** - Scale from research prototypes to deployed systems
 
 ## Use Cases
 
-- **Multi-Agent Research**: Baseline for comparing agent architectures
-- **Automated Data Science**: End-to-end ML pipeline automation
-- **Complex Task Decomposition**: Break down and solve multi-step problems
-- **Tool-Using Agents**: Research on dynamic tool creation and usage
-- **Agent Memory Systems**: Study persistence and experience learning
-
-## Contributing
-
-We welcome contributions! AgentZ is designed to be a community resource for multi-agent research.
-
-## License
-
-[Your License Here]
+- **Multi-Agent Research** - Baseline for comparing agent architectures
+- **Automated Data Science** - End-to-end ML pipeline automation
+- **Complex Task Decomposition** - Break down and solve multi-step problems
+- **Tool-Using Agents** - Research on dynamic tool creation and usage
+- **Agent Memory Systems** - Study persistence and experience learning
 
 ## Citation
 
@@ -174,10 +174,22 @@ If you use AgentZ in your research, please cite:
 }
 ```
 
-## Contact
+## Contributing
 
-For questions, issues, or collaborations, please open an issue on GitHub or contact [your contact info].
+We welcome contributions! AgentZ is designed to be a community resource for multi-agent research. Please open an issue or submit a pull request.
+
+## License
+
+[Your License Here]
+
+## Acknowledgements
+
+AgentZ is built with inspiration from the multi-agent systems research community. We thank the developers of various LLM frameworks and tools that make this work possible.
 
 ---
 
+<div align="center">
+
 **AgentZ**: Building intelligent agents from zero to hero 🚀
+
+</div>
