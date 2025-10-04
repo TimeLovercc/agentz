@@ -39,6 +39,7 @@ class DataScientistPipeline(BasePipeline):
         """Run the data analysis pipeline."""
         logger.info(f"Data path: {self.config.data_path}")
         logger.info(f"User prompt: {self.config.prompt}")
+        self.iteration = 0
 
         # Prepare research query
         query = self.prepare_query(
@@ -108,13 +109,13 @@ class DataScientistPipeline(BasePipeline):
         
         instructions = f"""
         Current Iteration Number: {self.iteration}
-        Time Elapsed: {(self.time.time() - self.start_time) / 60:.2f} minutes of maximum {self.max_time_minutes} minutes
+        Time Elapsed: {(time.time() - self.start_time) / 60:.2f} minutes of maximum {self.max_time_minutes} minutes
 
         ORIGINAL QUERY:
         {query}
 
         HISTORY OF ACTIONS, FINDINGS AND THOUGHTS:
-        {self.conversation.compile_conversation_history() or "No previous actions, findings or thoughts available."}        
+        {self.conversation.compile_conversation_history() or "No previous actions, findings or thoughts available."}
         """
 
         return await self.agent_step(
@@ -122,6 +123,7 @@ class DataScientistPipeline(BasePipeline):
             instructions=instructions,
             span_name="evaluate_research_state",
             span_type="function",
+            output_model=self.evaluate_agent.output_type,
         )
 
     async def _route_tasks(self, gap: str, query: str) -> Any:
@@ -144,6 +146,7 @@ class DataScientistPipeline(BasePipeline):
             instructions=instructions,
             span_name="route_tasks",
             span_type="tool",
+            output_model=self.routing_agent.output_type,
         )
 
     async def _execute_tools(self, tasks: List[Any]) -> List[str]:
