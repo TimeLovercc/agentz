@@ -185,7 +185,7 @@ class DataScientistPipeline(BasePipeline):
             else:
                 finding = str(result)
 
-            findings.append(finding)
+            findings.append(finding) 
             logger.info(f"Completed {task.agent}")
 
         # Store tool calls and findings in conversation history
