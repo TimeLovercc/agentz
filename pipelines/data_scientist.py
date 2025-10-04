@@ -5,8 +5,6 @@ import time
 from typing import Any, List
 from loguru import logger
 
-from agents import Runner
-from agents.tracing.create import agent_span
 from agentz.agents.manager_agents.routing_agent import AgentTask
 from agentz.agents.registry import create_agents
 from agentz.memory.global_memory import global_memory
@@ -221,27 +219,42 @@ class DataScientistPipeline(BasePipeline):
             error_output = f"Error executing {task.agent} for gap '{task.gap}': {str(e)}"
             return task.gap, task.agent, error_output
 
-    async def _create_final_report(self) -> str:
+    async def _create_final_report(
+        self,
+        length: str = "",
+        instructions: str = ""
+    ) -> str:
         """Generate the final report using the writer agent."""
+        logger.info("Drafting final response")
 
-        collated_findings = "\n".join(self.conversation.get_all_findings())
-        prompt = (
-            "Create a final research report summarizing the findings, "
-            "methodology, and recommendations.\n\n"
-            f"Dataset: {self.config.data_path}\n"
-            f"Task: {self.config.prompt}\n"
-            f"Findings: {collated_findings}"
+        length_str = f"* The full response should be approximately {length}.\n" if length else ""
+        instructions_str = f"* {instructions}" if instructions else ""
+        guidelines_str = ("\n\nGUIDELINES:\n" + length_str + instructions_str).strip('\n') if length or instructions else ""
+
+        all_findings = '\n\n'.join(self.conversation.get_all_findings()) or "No findings available yet."
+
+        prompt = f"""
+        Provide a response based on the query and findings below with as much detail as possible.{guidelines_str}
+
+        QUERY: {self.config.prompt}
+
+        DATASET: {self.config.data_path}
+
+        FINDINGS:
+        {all_findings}
+        """
+
+        result = await self.agent_step(
+            agent=self.writer_agent,
+            instructions=prompt,
+            span_name="writer_agent",
+            span_type="agent",
+            printer_key="writer",
+            printer_title="Writer",
         )
 
-        with self.span_context(
-            agent_span,
-            name="writer_agent",
-            tools=list(self.agents.keys()),
-        ) as span:
-            result = await Runner.run(self.writer_agent, prompt)
-            if span and hasattr(span, "set_output"):
-                span.set_output({"report_length": len(result.final_output)})
-            return result.final_output
+        logger.info("Final response created successfully")
+        return result.final_output
 
     async def _finalise_research(self, research_report: str) -> None:
         """Finalize logging, persist conversation, and update memory."""
@@ -249,7 +262,11 @@ class DataScientistPipeline(BasePipeline):
         timestamped_report = (
             f"Experiment {self.experiment_id}\n\n{research_report.strip()}"
         )
-        global_memory.store_report(timestamped_report)
+        global_memory.store(
+            key=f"report_{self.experiment_id}",
+            value=timestamped_report,
+            tags=["research_report"]
+        )
 
         logger.info(f"Stored research report with experiment_id {self.experiment_id}")
         self.update_printer("writer_agent", "Final report generated", is_done=True)
