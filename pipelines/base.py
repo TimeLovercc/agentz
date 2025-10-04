@@ -328,6 +328,8 @@ class BasePipeline:
         span_type: str = "agent",
         output_model: Optional[type[BaseModel]] = None,
         sync: bool = False,
+        printer_key: Optional[str] = None,
+        printer_title: Optional[str] = None,
         **span_kwargs
     ) -> Any:
         """Run an agent with span tracking and optional output parsing.
@@ -339,6 +341,8 @@ class BasePipeline:
             span_type: Type of span - "agent" or "function"
             output_model: Optional pydantic model to parse output
             sync: Whether to run synchronously
+            printer_key: Optional key for printer updates (will be prefixed with iter:N:)
+            printer_title: Optional title for printer display
             **span_kwargs: Additional kwargs for span (e.g., tools, input)
 
         Returns:
@@ -352,9 +356,20 @@ class BasePipeline:
             else:
                 result = await Runner.run(agent, instructions)
 
-            if output_model:
-                raw_output = getattr(result, "final_output", result)
+            raw_output = getattr(result, "final_output", result)
 
+            # Print output preview if printer_key is provided
+            if printer_key and self.printer:
+                full_key = f"iter:{self.iteration}:{printer_key}"
+                preview = str(raw_output)
+                if len(preview) > 600:
+                    preview = preview[:600] + "..."
+
+                title = printer_title or printer_key
+                message = f"{title}: {preview}"
+                self.printer.update_item(full_key, message, is_done=True)
+
+            if output_model:
                 if isinstance(raw_output, output_model):
                     output = raw_output
                 elif isinstance(raw_output, BaseModel):

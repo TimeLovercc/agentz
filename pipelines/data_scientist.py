@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any, List
 from loguru import logger
 
 from agents import Runner
 from agents.tracing.create import agent_span
+from agentz.agents.manager_agents.routing_agent import AgentTask
 from agentz.agents.registry import create_agents
 from agentz.memory.global_memory import global_memory
 from pipelines.base import BasePipeline, with_run_context
@@ -52,21 +54,21 @@ class DataScientistPipeline(BasePipeline):
         self.update_printer("research", "Executing research workflow...")
         self.start_time = time.time()
         while self.should_continue and self._check_constraints():
-            iteration_num = self.iteration + 1
-            logger.info(f"Starting iteration {iteration_num}")
+            self.iteration += 1
+            logger.info(f"Starting iteration {self.iteration}")
             self.conversation.add_iteration()
 
-            observations = await self._generate_observations(query=query)
+            await self._generate_observations(query=query)
             evaluation = await self._evaluate_research_state(query=query)
 
             if not evaluation.research_complete:
                 next_gap = evaluation.outstanding_gaps[0]
                 self.conversation.set_latest_gap(next_gap)
                 selection_plan = await self._route_tasks(next_gap, query)
-                results = await self._execute_tools(selection_plan.tasks)
+                await self._execute_tools(selection_plan.tasks)
 
             else:
-                logger.info(f"Research marked complete by evaluation agent at iteration {iteration_num}")
+                logger.info(f"Research marked complete by evaluation agent at iteration {self.iteration}")
                 self.should_continue = False
 
             self.iteration += 1
@@ -95,11 +97,13 @@ class DataScientistPipeline(BasePipeline):
             instructions=instructions,
             span_name="generate_observations",
             span_type="function",
+            printer_key="observe",
+            printer_title="Observations",
         )
 
         # Store observations as thought in conversation
-        if hasattr(result, 'final_output'):
-            self.conversation.set_latest_thought(result.final_output)
+        self.conversation.set_latest_thought(result.final_output)
+        
 
         return result
 
@@ -118,13 +122,23 @@ class DataScientistPipeline(BasePipeline):
         {self.conversation.compile_conversation_history() or "No previous actions, findings or thoughts available."}
         """
 
-        return await self.agent_step(
+        result = await self.agent_step(
             agent=self.evaluate_agent,
             instructions=instructions,
             span_name="evaluate_research_state",
             span_type="function",
             output_model=self.evaluate_agent.output_type,
+            printer_key="evaluate",
+            printer_title="Evaluation",
         )
+        
+        evaluation = result
+        
+        if not evaluation.research_complete:
+            next_gap = evaluation.outstanding_gaps[0]
+            self.conversation.set_latest_gap(next_gap)
+            
+        return evaluation
 
     async def _route_tasks(self, gap: str, query: str) -> Any:
         """Route tasks to the appropriate specialized agents."""
@@ -141,13 +155,20 @@ class DataScientistPipeline(BasePipeline):
         {self.conversation.compile_conversation_history() or "No previous actions, findings or thoughts available."}
         """
 
-        return await self.agent_step(
+        selection_plan = await self.agent_step(
             agent=self.routing_agent,
             instructions=instructions,
             span_name="route_tasks",
             span_type="tool",
             output_model=self.routing_agent.output_type,
+            printer_key="route",
+            printer_title="Routing",
         )
+
+        self.conversation.set_latest_tool_calls([
+            f"[Agent] {task.agent} [Query] {task.query} [Entity] {task.entity_website if task.entity_website else 'null'}" for task in selection_plan.tasks
+        ])
+        return selection_plan
 
     async def _execute_tools(self, tasks: List[Any]) -> List[str]:
         """Execute tool agent tasks and collect results.
@@ -158,41 +179,47 @@ class DataScientistPipeline(BasePipeline):
         Returns:
             List of findings from tool executions
         """
-        findings = []
-        tool_calls = []
-
+        async_tasks = []
         for task in tasks:
-            if task.agent not in self.agents:
-                logger.warning(f"Unknown tool agent requested: {task.agent}")
-                continue
+            async_tasks.append(self._run_agent_task(task))
 
-            tool_agent = self.agents[task.agent]
-            logger.info(f"Executing {task.agent} for gap: {task.gap}")
+        num_completed = 0
+        results = {}
+        for future in asyncio.as_completed(async_tasks):
+            gap, agent_name, result = await future
+            results[f"{agent_name}_{gap}"] = result
+            num_completed += 1
+            self.update_printer(f"tool:{agent_name}", f"Completed {agent_name}", is_done=True)
 
-            # Track the tool call
-            tool_calls.append(f"{task.agent}: {task.query}")
-
-            result = await self.agent_step(
-                agent=tool_agent,
-                instructions=task.query,
-                span_name=task.agent,
-                span_type="tool",
-            )
-
-            # Extract output from result
-            if hasattr(result, 'final_output'):
-                finding = result.final_output
-            else:
-                finding = str(result)
-
-            findings.append(finding) 
-            logger.info(f"Completed {task.agent}")
-
-        # Store tool calls and findings in conversation history
-        self.conversation.set_latest_tool_calls(tool_calls)
+        findings = []
+        for tool_output in results.values():
+            findings.append(tool_output.output)
         self.conversation.set_latest_findings(findings)
-
         return findings
+
+    async def _run_agent_task(self, task: AgentTask) -> tuple[str, str, str]:
+        """Run a single agent task and return the result."""
+        try:
+            agent_name = task.agent
+            agent = self.tool_agents.get(agent_name)
+            if agent:
+                result = await self.agent_step(
+                    agent=agent,
+                    instructions=task.model_dump_json(),
+                    span_name=task.agent,
+                    span_type="tool",
+                    printer_key=f"tool:{task.agent}",
+                    printer_title=f"Tool: {task.agent}",
+                )
+                # Extract output from result
+                output = result.final_output if hasattr(result, 'final_output') else str(result)
+            else:
+                output = f"No implementation found for agent {agent_name}"
+
+            return task.gap, agent_name, output
+        except Exception as e:
+            error_output = f"Error executing {task.agent} for gap '{task.gap}': {str(e)}"
+            return task.gap, task.agent, error_output
 
     async def _create_final_report(self) -> str:
         """Generate the final report using the writer agent."""
