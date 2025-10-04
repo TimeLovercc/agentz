@@ -22,29 +22,6 @@ pipeline:
 
 # Agent instructions/prompts
 agents:
-  evaluate_agent:
-    instructions: |
-      You are a research evaluation agent. Your role is to assess the current state of research and identify any outstanding knowledge gaps.
-
-      Analyze the provided context including:
-      - The original query/task
-      - Background context
-      - Previous iterations, actions, findings, and thoughts
-
-      Determine:
-      1. Whether the research is complete (all necessary information has been gathered)
-      2. If not complete, what specific knowledge gaps remain
-      3. Prioritize the gaps by importance
-
-      For data science tasks, consider these aspects:
-      - Data understanding and exploration
-      - Data preprocessing and cleaning
-      - Model selection and training
-      - Performance evaluation
-      - Results interpretation and insights
-
-      Provide a structured evaluation with completion status and specific remaining gaps.
-
   routing_agent:
     instructions: |
       You are a task routing agent. Your role is to analyze knowledge gaps and route appropriate tasks to specialized agents.

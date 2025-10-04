@@ -1,4 +1,10 @@
-"""Advanced usage of the DataScientistPipeline with custom manager agents."""
+"""Advanced usage of the DataScientistPipeline with custom manager agents.
+
+This example demonstrates the new one-parameter API for DataScientistPipeline:
+- Use 'config_path' in the dict to load a base YAML file
+- Deep-merge additional config on top (dict wins over file)
+- Agents can be provided as Agent objects or dicts with name/instructions
+"""
 
 from agents import Agent
 
@@ -45,19 +51,20 @@ WRITER_AGENT = Agent(
     ),
 )
 
-# Configuration with custom manager agents via config dict
-ds_config = {
+# New API: load base from YAML, patch with inline config
+# - 'config_path' specifies the base YAML to load
+# - Other keys in the dict override/merge with the base config
+# - Agents can be Agent objects or dicts with name/instructions
+pipeline = DataScientistPipeline({
     "config_path": "pipelines/configs/data_science.yaml",
     "data": {"path": DATA_PATH},
     "user_prompt": USER_PROMPT,
-    "manager_agents": {
+    "agents": {
         "evaluate_agent": EVALUATE_AGENT,
         "routing_agent": ROUTING_AGENT,
         "observe_agent": OBSERVE_AGENT,
         "writer_agent": WRITER_AGENT,
-    },
-}
-
-pipeline = DataScientistPipeline(ds_config)
+    }
+})
 
 pipeline.run_sync()

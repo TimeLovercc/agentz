@@ -12,18 +12,18 @@ from pipelines.base import BasePipeline, with_run_context
 
 class DataScientistPipeline(BasePipeline):
     """Main pipeline orchestrator for data analysis tasks using iterative research."""
-    
+
     def __init__(self, config):
-        super().__init__()
+        super().__init__(config)
 
-        # Create manager agents
-        self.observe_agent = create_agents("observe_agent", config.llm)
-        self.evaluate_agent = create_agents("evaluate_agent", config.llm)
-        self.routing_agent = create_agents("routing_agent", config.llm)
-        self.writer_agent = create_agents("writer_agent", config.llm)
+        # Setup manager agents - check if they're already Agent instances or need to be created
+        self.observe_agent = create_agents("observe_agent", config)
+        self.evaluate_agent = create_agents("evaluate_agent", config)
+        self.routing_agent = create_agents("routing_agent", config)
+        self.writer_agent = create_agents("writer_agent", config)
 
-        # Create worker agents
-        self.tool_agents = create_agents([
+        # Create worker agents - these are typically from registry
+        tool_agent_names = [
             "data_loader_agent",
             "data_analysis_agent",
             "preprocessing_agent",
@@ -31,7 +31,8 @@ class DataScientistPipeline(BasePipeline):
             "evaluation_agent",
             "visualization_agent",
             "code_generation_agent",
-        ], config.llm)
+        ]
+        self.tool_agents = create_agents(tool_agent_names, config)
 
     @with_run_context
     async def run(self):
@@ -158,11 +159,11 @@ class DataScientistPipeline(BasePipeline):
         tool_calls = []
 
         for task in tasks:
-            if task.agent not in self.tool_agents:
+            if task.agent not in self.agents:
                 logger.warning(f"Unknown tool agent requested: {task.agent}")
                 continue
 
-            tool_agent = self.tool_agents[task.agent]
+            tool_agent = self.agents[task.agent]
             logger.info(f"Executing {task.agent} for gap: {task.gap}")
 
             # Track the tool call
@@ -205,7 +206,7 @@ class DataScientistPipeline(BasePipeline):
         with self.span_context(
             agent_span,
             name="writer_agent",
-            tools=list(self.tool_agents.keys()),
+            tools=list(self.agents.keys()),
         ) as span:
             result = await Runner.run(self.writer_agent, prompt)
             if span and hasattr(span, "set_output"):

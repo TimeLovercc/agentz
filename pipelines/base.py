@@ -10,7 +10,8 @@ from rich.console import Console
 
 from agents import Runner
 from agents.tracing.create import agent_span, function_span, trace
-from agentz.configuration.base import BaseConfig, load_pipeline_config
+from agentz.agents.registry import AgentStore, set_current_pipeline_store
+from agentz.configuration.base import BaseConfig, resolve_config
 from agentz.utils import Printer, get_experiment_timestamp
 from pydantic import BaseModel, Field
 
@@ -132,24 +133,49 @@ def with_span_step(
 class BasePipeline:
     """Base class for all pipelines with common configuration and setup."""
 
-    def __init__(self, config: Union[BaseConfig, Mapping[str, Any], str, Path], manager_factories=None, initial_tool_agents=None):
-        """Initialise the pipeline using a single configuration input."""
+    def __init__(self, config: Union[str, Path, Mapping[str, Any], BaseConfig]):
+        """Initialize the pipeline using a single configuration input.
+
+        Args:
+            spec: Configuration specification:
+                - str/Path: Load YAML/JSON file
+                - dict with 'config_path': Load file, then deep-merge dict on top (dict wins)
+                - dict without 'config_path': Use as-is
+                - BaseConfig: Use as-is
+            strict: Whether to strictly validate configuration (default: True).
+
+        Examples:
+            # Load from file
+            BasePipeline("pipelines/configs/data_science.yaml")
+
+            # Dict without config_path
+            BasePipeline({"provider": "openai", "data": {"path": "data.csv"}})
+
+            # Dict that patches a file (use 'config_path')
+            BasePipeline({
+                "config_path": "pipelines/configs/data_science.yaml",
+                "data": {"path": "data/banana_quality.csv"},
+                "user_prompt": "Custom prompt..."
+            })
+
+            # BaseConfig object
+            BasePipeline(BaseConfig(provider="openai", data={"path": "data.csv"}))
+        """
         self.console = Console()
         self._printer: Optional[Printer] = None
 
-        # Load and process configuration
-        self.config = load_pipeline_config(config)
+        # Resolve configuration using the new unified API
+        self.config = resolve_config(config)
 
-        # Build agents from provided factories
-        if manager_factories:
-            self.manager_agents = self._build_manager_agents(manager_factories)
-        else:
-            self.manager_agents = {}
+        # Initialize agent store with config
+        self.agents = AgentStore(self.config)
 
-        if initial_tool_agents:
-            self.tool_agents = self._build_tool_agents(initial_tool_agents)
-        else:
-            self.tool_agents = {}
+        # Set as current pipeline store for auto-registration
+        set_current_pipeline_store(self.agents)
+
+        # Merge agents from config if present
+        if self.config.agents:
+            self.agents.merge_config(self.config.agents)
 
         # Generic pipeline settings
         self.experiment_id = get_experiment_timestamp()
@@ -487,69 +513,6 @@ class BasePipeline:
     async def run(self):  # pragma: no cover - must be implemented by subclasses
         raise NotImplementedError("Subclasses must implement 'run'")
 
-    def _instantiate_agent_spec(self, spec, config):
-        """Instantiate a manager agent from the provided specification."""
-        if callable(spec):
-            return spec(config)
-        if hasattr(spec, "clone"):
-            cloned = spec.clone()
-            if getattr(cloned, "model", None) is None:
-                cloned.model = config.main_model
-            return cloned
-        return spec
-
-    def _instantiate_tool_agent_spec(self, spec, config):
-        """Instantiate a tool agent from the provided specification."""
-        if callable(spec):
-            return spec(config)
-        return spec
-
-    def _build_manager_agents(self, default_factories: Dict[str, Any]) -> Dict[str, Any]:
-        """Build manager agents from config and default factories.
-
-        Args:
-            default_factories: Dict mapping agent names to factory functions
-
-        Returns:
-            Dict of instantiated manager agents
-        """
-        manager_overrides = self.config.manager_agents
-        if manager_overrides and not isinstance(manager_overrides, dict):
-            raise TypeError("manager_agents section in config must be a mapping")
-
-        manager_agents = {}
-        for name, factory in default_factories.items():
-            if manager_overrides and name in manager_overrides:
-                manager_agents[name] = self._instantiate_agent_spec(
-                    manager_overrides[name], self.config.llm
-                )
-            else:
-                manager_agents[name] = factory(self.config.llm)
-
-        return manager_agents
-
-    def _build_tool_agents(self, initial_tool_agents: Dict[str, Any]) -> Dict[str, Any]:
-        """Build tool agents from config and initial agents.
-
-        Args:
-            initial_tool_agents: Initial dict of tool agents (e.g., from init_tool_agents)
-
-        Returns:
-            Dict of tool agents with config overrides applied
-        """
-        tool_overrides = self.config.tool_agents
-        if tool_overrides and not isinstance(tool_overrides, dict):
-            raise TypeError("tool_agents section in config must be a mapping")
-
-        tool_agents = initial_tool_agents.copy()
-
-        if isinstance(tool_overrides, dict):
-            for tool_name, spec in tool_overrides.items():
-                tool_agents[tool_name] = self._instantiate_tool_agent_spec(
-                    spec, self.config.llm
-                )
-
-        return tool_agents
 
 
 class IterationData(BaseModel):
