@@ -1,35 +1,36 @@
 from __future__ import annotations
 
+from typing import Optional
 from loguru import logger
 
 from agents import Agent
-from agentz.llm.llm_setup import LLMConfig
+from agentz.configuration.base import BaseConfig, get_agent_spec
 from agentz.agents.registry import register_agent, ToolAgentOutput
 
 
 @register_agent("evaluation_agent", aliases=["evaluation", "eval_tool"])
-def create_evaluation_agent(config: LLMConfig) -> Agent:
-    """Create an evaluation agent using OpenAI Agents SDK.
+def create_evaluation_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
+    """Create an evaluation agent.
 
     Args:
-        config: LLM configuration with full_config containing agent prompts
+        cfg: Base configuration
+        spec: Optional agent spec with {instructions, params}
 
     Returns:
         Agent instance configured for model evaluation tasks
     """
+    if spec is None:
+        spec = get_agent_spec(cfg, "evaluation_agent")
 
-    if not config.full_config:
-        raise ValueError("Agent instructions for 'evaluation_agent' not found in config. Please provide config_file with agent instructions.")
-
-    instructions = config.full_config.get('agents', {}).get('tool_agents', {}).get('evaluation_agent', {}).get('instructions')
-    if not instructions:
-        raise ValueError("Agent instructions for 'evaluation_agent' not found in config. Please provide config_file with agent instructions.")
+    instructions = spec["instructions"]
+    params = spec.get("params", {})
 
     agent = Agent(
-        name="Evaluation",
+        name="Model Evaluator",
         instructions=instructions,
         output_type=ToolAgentOutput,
-        model=config.main_model
+        model=cfg.llm.main_model,
+        **params
     )
 
     logger.info("Created EvaluationAgent")

@@ -1,8 +1,11 @@
 from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional, Union
+from pathlib import Path
 from loguru import logger
 import asyncio
 import inspect
+import importlib
+import pkgutil
 from pydantic import BaseModel, Field
 
 try:
@@ -14,6 +17,66 @@ except Exception as e:
 ALL_AGENT_FACTORIES: Dict[str, Callable[..., Any]] = {}
 # Alias -> canonical name
 _AGENT_ALIASES: Dict[str, str] = {}
+
+# Auto-discovery guard
+_DISCOVERY_DONE = False
+
+
+def _try_import_module(mod: str) -> None:
+    """Best-effort module import (silently ignore failures)."""
+    try:
+        importlib.import_module(mod)
+    except Exception:
+        pass
+
+
+def _import_all_under_agents_root() -> None:
+    """Recursively import all submodules under agentz.agents."""
+    try:
+        pkg = importlib.import_module("agentz.agents")
+    except Exception:
+        return
+
+    pkg_path = getattr(pkg, "__path__", None)
+    if not pkg_path:
+        return
+
+    for _, name, _ in pkgutil.walk_packages(pkg_path, prefix=pkg.__name__ + "."):
+        _try_import_module(name)
+
+
+def _ensure_registry_populated(agent_name_hint: Optional[str] = None) -> None:
+    """Ensure agent registry is populated via lazy auto-discovery.
+
+    Args:
+        agent_name_hint: Optional agent name to try convention-based imports first
+    """
+    global _DISCOVERY_DONE
+
+    if _DISCOVERY_DONE and ALL_AGENT_FACTORIES:
+        return
+
+    # 1) Try convention-based imports first (cheap, specific)
+    if agent_name_hint:
+        leaf = agent_name_hint.strip().lower()
+        for mod in (
+            f"agentz.agents.{leaf}",
+            f"agentz.agents.{leaf}_agent",
+            f"agentz.agents.manager_agents.{leaf}",
+            f"agentz.agents.worker_agents.{leaf}",
+        ):
+            _try_import_module(mod)
+
+        # Check if we found it
+        if ALL_AGENT_FACTORIES.get(leaf):
+            logger.debug(f"Found agent '{leaf}' via convention-based import")
+            return
+
+    # 2) Full recursive import under agentz.agents (one-time)
+    if not _DISCOVERY_DONE:
+        _import_all_under_agents_root()
+        _DISCOVERY_DONE = True
+        logger.debug(f"Auto-discovered {len(ALL_AGENT_FACTORIES)} agent factories")
 
 
 class ToolAgentOutput(BaseModel):
@@ -57,6 +120,11 @@ def list_agents() -> List[str]:
 async def _build_one_async(agent_name: str, config: Any) -> Any:
     """Internal async builder that supports sync or async factories."""
     canonical = _resolve_name(agent_name)
+
+    # Auto-discover agents if not found
+    if canonical not in ALL_AGENT_FACTORIES:
+        _ensure_registry_populated(agent_name_hint=canonical)
+
     if canonical not in ALL_AGENT_FACTORIES:
         available = sorted(ALL_AGENT_FACTORIES.keys())
         raise ValueError(
@@ -102,37 +170,55 @@ class AgentRegistry:
 
         Args:
             name: Agent name to look up in registry
-            spec: Optional dict with additional agent parameters
+            spec: Optional dict with additional agent parameters (if None, will try to get from config)
             config: Optional config object for factory function
 
         Returns:
             Agent instance
         """
         canonical = _resolve_name(name)
+
+        # Auto-discover agents if not found
+        if canonical not in ALL_AGENT_FACTORIES:
+            _ensure_registry_populated(agent_name_hint=canonical)
+
         if canonical not in ALL_AGENT_FACTORIES:
             available = sorted(ALL_AGENT_FACTORIES.keys())
             raise ValueError(f"Unknown agent name: {name}. Available agents: {available}")
 
         factory = ALL_AGENT_FACTORIES[canonical]
 
-        # If spec provided and factory accepts it, pass both config and spec
-        # Otherwise just pass config
-        if spec and config:
+        # If spec not provided, try to get from config
+        if spec is None and config is not None:
+            try:
+                from agentz.configuration.base import get_agent_spec
+                spec = get_agent_spec(config, canonical)
+            except (ValueError, AttributeError):
+                # Config doesn't have this agent spec, that's ok
+                pass
+
+        # Call factory with config and spec
+        if config:
             try:
                 sig = inspect.signature(factory)
                 if len(sig.parameters) >= 2:
+                    # Factory accepts (config, spec)
                     result = factory(config, spec)
                 else:
+                    # Factory only accepts config
                     result = factory(config)
             except TypeError:
+                # Fallback: just pass config
                 result = factory(config)
-        elif config:
-            result = factory(config)
+        elif spec and "instructions" in spec:
+            # No config but have spec - build directly
+            params = spec.get("params", {})
+            return Agent(
+                name=spec.get("name", name),
+                instructions=spec["instructions"],
+                **params
+            )
         else:
-            # No config - try to build with just spec if it has the required fields
-            if spec and "name" in spec and "instructions" in spec:
-                return Agent(name=spec["name"], instructions=spec["instructions"],
-                           **{k: v for k, v in spec.items() if k not in {"name", "instructions"}})
             raise ValueError(f"Cannot build agent '{name}' without config or valid spec")
 
         # Handle async results
@@ -425,7 +511,7 @@ def create_agents(
             - str: Single agent name
             - List[str]: List of agent names
             - Dict[str, Any]: Mapping of name -> Agent/spec/registry_key
-        config: LLM configuration with full_config containing agent prompts
+        config: Configuration (BaseConfig, LLMConfig, or path to resolve)
         group: Optional group name for automatic registration (e.g., "manager", "workers")
 
     Returns:
@@ -449,6 +535,18 @@ def create_agents(
             "loader": "data_loader_agent"  # registry key
         }, config, group="workers")
     """
+    # Resolve config if it's a string/path
+    from agentz.configuration.base import BaseConfig
+    if isinstance(config, (str, Path)):
+        from agentz.configuration.base import resolve_config
+        config = resolve_config(config)
+    # If it's LLMConfig, try to get the BaseConfig from current pipeline store
+    elif hasattr(config, "full_config") and not isinstance(config, BaseConfig):
+        # It's LLMConfig - try to get BaseConfig from pipeline store
+        store = get_current_pipeline_store()
+        if store and hasattr(store, "_config"):
+            config = store._config
+
     store = get_current_pipeline_store()
 
     # Single name (string)

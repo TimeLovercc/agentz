@@ -167,15 +167,12 @@ class BasePipeline:
         # Resolve configuration using the new unified API
         self.config = resolve_config(config)
 
-        # Initialize agent store with config
+        # Initialize agent store with BaseConfig (not LLM config)
+        # Factories now receive BaseConfig and extract specs from agents_index
         self.agents = AgentStore(self.config)
 
         # Set as current pipeline store for auto-registration
         set_current_pipeline_store(self.agents)
-
-        # Merge agents from config if present
-        if self.config.agents:
-            self.agents.merge_config(self.config.agents)
 
         # Generic pipeline settings
         self.experiment_id = get_experiment_timestamp()

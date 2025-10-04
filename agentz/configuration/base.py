@@ -40,6 +40,7 @@ class BaseConfig(BaseModel):
     # runtime conveniences for agents
     agents_flat: Dict[str, Any] = Field(default_factory=dict, exclude=True)   # name -> Agent
     agent_groups: Dict[str, List[str]] = Field(default_factory=dict, exclude=True)
+    agents_index: Dict[str, Dict[str, Any]] = Field(default_factory=dict, exclude=True)  # name -> {instructions, params}
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -227,6 +228,75 @@ def _deep_merge(base: Dict[str, Any], override: Mapping[str, Any]) -> Dict[str, 
     return out
 
 
+def normalize_agents(agents_config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Normalize agent config into flat index: {name: {instructions, params}}.
+
+    Args:
+        agents_config: Raw agents section from config
+
+    Returns:
+        Dict mapping agent name to {instructions: str, params: dict}
+    """
+    index: Dict[str, Dict[str, Any]] = {}
+
+    def _walk(node: Dict[str, Any], parent_path: str = "") -> None:
+        for key, value in node.items():
+            # Check if this is an agent spec
+            if isinstance(value, str):
+                # String -> instructions
+                index[key] = {"instructions": value, "params": {}}
+            elif isinstance(value, dict):
+                # Check if it has instructions (leaf spec)
+                if "instructions" in value:
+                    index[key] = {
+                        "instructions": value["instructions"],
+                        "params": value.get("params", {})
+                    }
+                elif _is_agent_instance(value):
+                    # Runtime Agent instance - skip (handled elsewhere)
+                    pass
+                else:
+                    # It's a group - recurse
+                    _walk(value, key)
+
+    _walk(agents_config)
+    return index
+
+
+def get_agent_spec(cfg: BaseConfig, name: str, required: bool = True) -> Optional[Dict[str, Any]]:
+    """Get normalized agent spec from config.
+
+    Args:
+        cfg: BaseConfig instance
+        name: Agent name
+        required: If True, raise error if not found; if False, return None
+
+    Returns:
+        Dict with {instructions: str, params: dict} or None if not found and not required
+
+    Raises:
+        ValueError: If agent not found or missing instructions and required=True
+    """
+    idx = getattr(cfg, "agents_index", None)
+    if not idx or name not in idx:
+        if required:
+            available = list(idx.keys()) if idx else []
+            raise ValueError(
+                f"Agent '{name}' not found in config.agents. "
+                f"Available agents: {available}. "
+                f"Please add agent definition to your config YAML file."
+            )
+        return None
+
+    spec = idx[name]
+    if not spec.get("instructions"):
+        if required:
+            raise ValueError(f"Missing instructions for agent '{name}' in config.agents")
+        return None
+
+    return spec
+
+
 def _expand_env_vars(obj: Any) -> Any:
     """Recursively expand environment variables in strings (${VAR} format)."""
     if isinstance(obj, str):
@@ -357,6 +427,9 @@ def resolve_config(spec: Union[str, Path, Mapping[str, Any], BaseConfig]) -> Bas
         config.agents = agents_tree
         config.agents_flat = agents_flat
         config.agent_groups = agent_groups
+
+        # Build agents index for easy spec lookup
+        config.agents_index = normalize_agents(config.agents or {})
     except Exception as e:
         raise ValueError(f"Failed to process agents configuration: {e}") from e
 
