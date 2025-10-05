@@ -63,7 +63,7 @@ def _ensure_registry_populated(agent_name_hint: Optional[str] = None) -> None:
             f"agentz.agents.{leaf}",
             f"agentz.agents.{leaf}_agent",
             f"agentz.agents.manager_agents.{leaf}",
-            f"agentz.agents.worker_agents.{leaf}",
+            f"agentz.agents.data_agents.{leaf}",
         ):
             _try_import_module(mod)
 

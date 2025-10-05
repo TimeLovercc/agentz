@@ -7,7 +7,6 @@ from loguru import logger
 
 from agentz.agents.manager_agents.routing_agent import AgentTask
 from agentz.agents.registry import create_agents
-from agentz.flow import with_run_context
 from agentz.memory.global_memory import global_memory
 from agentz.memory.conversation import Conversation
 from pipelines.base import BasePipeline
@@ -37,7 +36,6 @@ class DataScientistPipeline(BasePipeline):
         self.tool_agents = create_agents(tool_agent_names, config)
         self.conversation = Conversation()
 
-    @with_run_context
     async def run(self):
         """Run the data analysis pipeline."""
         logger.info(f"Data path: {self.config.data_path}")
