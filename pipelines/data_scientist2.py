@@ -7,9 +7,10 @@ from loguru import logger
 
 from agentz.agents.manager_agents.routing_agent import AgentTask
 from agentz.agents.registry import create_agents
+from agentz.flow import with_run_context
 from agentz.memory.global_memory import global_memory
-from pipelines.base import BasePipeline, with_run_context
 from agentz.memory.conversation import Conversation
+from pipelines.base import BasePipeline
 
 class DataScientistPipeline(BasePipeline):
     """Main pipeline orchestrator for data analysis tasks using iterative research."""
