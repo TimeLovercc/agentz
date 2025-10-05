@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Any, List
 from loguru import logger
 
+from agentz.agents.manager_agents.routing_agent import AgentTask
 from agentz.agents.registry import create_agents
-from agentz.flow import AgentExecutor, AgentStep, PrinterConfig, with_run_context
+from agentz.flow import with_run_context
 from agentz.memory.global_memory import global_memory
+from agentz.memory.conversation import Conversation
 from pipelines.base import BasePipeline
 
 class DataScientistPipeline(BasePipeline):
@@ -32,115 +35,7 @@ class DataScientistPipeline(BasePipeline):
             "code_generation_agent",
         ]
         self.tool_agents = create_agents(tool_agent_names, config)
-
-    def _extract_by_path(self, obj, path: str):
-        """Generic extractor supporting dotted paths and [index] lookups."""
-        if not path:
-            return None
-        cur = obj
-        for token in path.replace("]", "").split("."):
-            if not token:
-                continue
-            if "[" in token:
-                name, idx = token.split("[", 1)
-                if name:
-                    cur = getattr(cur, name, cur[name] if isinstance(cur, dict) else None)
-                try:
-                    cur = cur[int(idx)]
-                except Exception:
-                    return None
-            else:
-                cur = getattr(cur, token, cur.get(token) if isinstance(cur, dict) else None)
-            if cur is None:
-                return None
-        return cur
-
-    def _apply_conversation_emits(self, *, agent, result, final_text: str, ctx: dict):
-        """Apply agent.emits rules to self.conversation in a generic way."""
-        emits = getattr(agent, "emits", []) or []
-        for rule in emits:
-            if callable(rule.get("when")) and not rule["when"](result, ctx):
-                continue
-            ev_type = rule.get("type")
-            source = rule.get("source", "final_text")
-            data = None
-
-            if source == "final_text":
-                data = final_text
-            elif source == "path":
-                data = self._extract_by_path(result, rule.get("path", ""))
-
-            if ev_type == "thought" and isinstance(data, str):
-                self.conversation.set_latest_thought(data)
-
-            elif ev_type == "gap" and isinstance(data, str):
-                self.conversation.set_latest_gap(data)
-
-            elif ev_type == "tool_calls":
-                items = data or []
-                fmt = rule.get("format")
-                if fmt:
-                    rendered = []
-                    for item in items:
-                        try:
-                            rendered.append(fmt.format(item=item))
-                        except Exception:
-                            rendered.append(str(item))
-                    self.conversation.set_latest_tool_calls(rendered)
-                else:
-                    self.conversation.set_latest_tool_calls([str(x) for x in items])
-
-            elif ev_type == "findings":
-                if data is None:
-                    continue
-                if isinstance(data, list):
-                    self.conversation.set_latest_findings([str(x) for x in data])
-                else:
-                    self.conversation.set_latest_findings([str(data)] if rule.get("wrap_list", False) else [str(data)])
-
-    async def _agent_step_generic(
-        self,
-        *,
-        agent,
-        span_name: str,
-        printer_key: str,
-        printer_title: str,
-        output_model=None,
-        phase: str | None = None,
-        extra: dict | None = None,
-    ):
-        """Generic agent step execution with automatic conversation updates."""
-        minutes_elapsed = (time.time() - self.start_time) / 60 if hasattr(self, "start_time") else 0.0
-        ctx = {
-            "phase": phase or getattr(agent, "name", "default"),
-            "iteration": self.iteration,
-            "query": self.prepare_query(
-                content=f"Task: {self.config.prompt}\nDataset path: {self.config.data_path}\nProvide a comprehensive data science workflow"
-            ),
-            "history": self.conversation.compile_conversation_history(),
-            "gap": getattr(self.conversation, "latest_gap", None),
-            "minutes_elapsed": minutes_elapsed,
-            "max_time_minutes": self.max_time_minutes,
-            "extra": extra or {},
-        }
-        instructions = agent.prepare_instructions(ctx) if hasattr(agent, "prepare_instructions") else ctx["query"]
-
-        step = AgentStep(
-            agent=agent,
-            instructions=instructions,
-            span_name=span_name,
-            output_model=output_model or getattr(agent, "output_type", None),
-            printer_config=PrinterConfig(key=printer_key, title=printer_title),
-        )
-        executor = AgentExecutor(self.execution_context)
-        result = await executor.execute_step(step)
-
-        final_text = getattr(result, "final_output", None) or getattr(result, "output", None) or str(result)
-
-        # APPLY GENERIC EMIT RULES (no phase branching):
-        self._apply_conversation_emits(agent=agent, result=result, final_text=final_text, ctx=ctx)
-
-        return result
+        self.conversation = Conversation()
 
     @with_run_context
     async def run(self):
@@ -148,73 +43,221 @@ class DataScientistPipeline(BasePipeline):
         logger.info(f"Data path: {self.config.data_path}")
         logger.info(f"User prompt: {self.config.prompt}")
         self.iteration = 0
-        self.start_time = time.time()
-        self.update_printer("research", "Executing research workflow...")
 
+        # Prepare research query
+        query = self.prepare_query(
+            content=f"Task: {self.config.prompt}\n"
+                f"Dataset path: {self.config.data_path}\n"
+                "Provide a comprehensive data science workflow"
+        )
+
+        # Run research workflow
+        self.update_printer("research", "Executing research workflow...")
+        self.start_time = time.time()
         while self.should_continue and self._check_constraints():
             self.iteration += 1
+            logger.info(f"Starting iteration {self.iteration}")
             self.conversation.add_iteration()
 
-            await self._agent_step_generic(
-                agent=self.observe_agent,
-                phase="observe",
-                span_name="generate_observations",
-                printer_key="observe",
-                printer_title="Observations",
-            )
+            await self._generate_observations(query=query)
+            evaluation = await self._evaluate_research_state(query=query)
 
-            evaluation = await self._agent_step_generic(
-                agent=self.evaluate_agent,
-                phase="evaluate",
-                span_name="evaluate_research_state",
-                printer_key="evaluate",
-                printer_title="Evaluation",
-                output_model=getattr(self.evaluate_agent, "output_type", None),
-            )
-            if getattr(evaluation, "research_complete", False):
-                break
+            if not evaluation.research_complete:
+                next_gap = evaluation.outstanding_gaps[0]
+                self.conversation.set_latest_gap(next_gap)
+                selection_plan = await self._route_tasks(next_gap, query)
+                await self._execute_tools(selection_plan.tasks)
 
-            selection_plan = await self._agent_step_generic(
-                agent=self.routing_agent,
-                phase="route",
-                span_name="route_tasks",
-                printer_key="route",
-                printer_title="Routing",
-                output_model=getattr(self.routing_agent, "output_type", None),
-            )
+            else:
+                logger.info(f"Research marked complete by evaluation agent at iteration {self.iteration}")
+                self.should_continue = False
 
-            tasks = getattr(selection_plan, "tasks", [])
-            async def _run_tool(t):
-                tool_agent = self.tool_agents.get(t.agent)
-                if not tool_agent:
-                    self.update_printer(f"tool:{t.agent}", f"No implementation for {t.agent}", is_done=True)
-                    return
-                await self._agent_step_generic(
-                    agent=tool_agent,
-                    phase=f"tool:{t.agent}",
-                    span_name=t.agent,
-                    printer_key=f"tool:{t.agent}",
-                    printer_title=f"Tool: {t.agent}",
-                    extra={"task_json": t.model_dump_json()},
+            self.iteration += 1
+
+        research_report = await self._create_final_report()
+
+        self.update_printer("research", "Research workflow complete", is_done=True)
+        logger.info("Research workflow completed")
+        return research_report
+
+    async def _generate_observations(self, query: str) -> Any:
+        """Generate observations based on the query."""
+
+        instructions = f"""
+        You are starting iteration {self.iteration} of your research process.
+
+        ORIGINAL QUERY:
+        {query}
+
+        HISTORY OF ACTIONS, FINDINGS AND THOUGHTS:
+        {self.conversation.compile_conversation_history() or "No previous actions, findings or thoughts available."}
+        """
+
+        result = await self.agent_step(
+            agent=self.observe_agent,
+            instructions=instructions,
+            span_name="generate_observations",
+            span_type="function",
+            printer_key="observe",
+            printer_title="Observations",
+        )
+
+        # Store observations as thought in conversation
+        self.conversation.set_latest_thought(result.final_output)
+        
+
+        return result
+
+
+    async def _evaluate_research_state(self, *, query: str) -> Any:
+        """Evaluate whether research is complete and identify gaps."""
+        
+        instructions = f"""
+        Current Iteration Number: {self.iteration}
+        Time Elapsed: {(time.time() - self.start_time) / 60:.2f} minutes of maximum {self.max_time_minutes} minutes
+
+        ORIGINAL QUERY:
+        {query}
+
+        HISTORY OF ACTIONS, FINDINGS AND THOUGHTS:
+        {self.conversation.compile_conversation_history() or "No previous actions, findings or thoughts available."}
+        """
+
+        result = await self.agent_step(
+            agent=self.evaluate_agent,
+            instructions=instructions,
+            span_name="evaluate_research_state",
+            span_type="function",
+            output_model=self.evaluate_agent.output_type,
+            printer_key="evaluate",
+            printer_title="Evaluation",
+        )
+        
+        evaluation = result
+        
+        if not evaluation.research_complete:
+            next_gap = evaluation.outstanding_gaps[0]
+            self.conversation.set_latest_gap(next_gap)
+            
+        return evaluation
+
+    async def _route_tasks(self, gap: str, query: str) -> Any:
+        """Route tasks to the appropriate specialized agents."""
+
+        instructions = f"""
+        ORIGINAL QUERY:
+        {query}
+
+        KNOWLEDGE GAP TO ADDRESS:
+        {gap}
+
+
+        HISTORY OF ACTIONS, FINDINGS AND THOUGHTS:
+        {self.conversation.compile_conversation_history() or "No previous actions, findings or thoughts available."}
+        """
+
+        selection_plan = await self.agent_step(
+            agent=self.routing_agent,
+            instructions=instructions,
+            span_name="route_tasks",
+            span_type="tool",
+            output_model=self.routing_agent.output_type,
+            printer_key="route",
+            printer_title="Routing",
+        )
+
+        self.conversation.set_latest_tool_calls([
+            f"[Agent] {task.agent} [Query] {task.query} [Entity] {task.entity_website if task.entity_website else 'null'}" for task in selection_plan.tasks
+        ])
+        return selection_plan
+
+    async def _execute_tools(self, tasks: List[Any]) -> List[str]:
+        """Execute tool agent tasks and collect results.
+
+        Args:
+            tasks: List of AgentTask objects from routing plan
+
+        Returns:
+            List of findings from tool executions
+        """
+        async_tasks = []
+        for task in tasks:
+            async_tasks.append(self._run_agent_task(task))
+
+        num_completed = 0
+        results = {}
+        for future in asyncio.as_completed(async_tasks):
+            gap, agent_name, result = await future
+            results[f"{agent_name}_{gap}"] = result
+            num_completed += 1
+            self.update_printer(f"tool:{agent_name}", f"Completed {agent_name}", is_done=True)
+
+        findings = []
+        for tool_output in results.values():
+            findings.append(tool_output.output)
+        self.conversation.set_latest_findings(findings)
+        return findings
+
+    async def _run_agent_task(self, task: AgentTask) -> tuple[str, str, str]:
+        """Run a single agent task and return the result."""
+        try:
+            agent_name = task.agent
+            agent = self.tool_agents.get(agent_name)
+            if agent:
+                result = await self.agent_step(
+                    agent=agent,
+                    instructions=task.model_dump_json(),
+                    span_name=task.agent,
+                    span_type="tool",
+                    printer_key=f"tool:{task.agent}",
+                    printer_title=f"Tool: {task.agent}",
                 )
-                self.update_printer(f"tool:{t.agent}", f"Completed {t.agent}", is_done=True)
+                # Extract output from result
+                output = result.final_output if hasattr(result, 'final_output') else str(result)
+            else:
+                output = f"No implementation found for agent {agent_name}"
 
-            await asyncio.gather(*[_run_tool(t) for t in tasks])
+            return task.gap, agent_name, output
+        except Exception as e:
+            error_output = f"Error executing {task.agent} for gap '{task.gap}': {str(e)}"
+            return task.gap, task.agent, error_output
 
-        # Writer
-        all_findings = "\n\n".join(self.conversation.get_all_findings()) or "No findings available yet."
-        writer_extra = {"findings_text": all_findings}
-        writer_result = await self._agent_step_generic(
+    async def _create_final_report(
+        self,
+        length: str = "",
+        instructions: str = ""
+    ) -> str:
+        """Generate the final report using the writer agent."""
+        logger.info("Drafting final response")
+
+        length_str = f"* The full response should be approximately {length}.\n" if length else ""
+        instructions_str = f"* {instructions}" if instructions else ""
+        guidelines_str = ("\n\nGUIDELINES:\n" + length_str + instructions_str).strip('\n') if length or instructions else ""
+
+        all_findings = '\n\n'.join(self.conversation.get_all_findings()) or "No findings available yet."
+
+        prompt = f"""
+        Provide a response based on the query and findings below with as much detail as possible.{guidelines_str}
+
+        QUERY: {self.config.prompt}
+
+        DATASET: {self.config.data_path}
+
+        FINDINGS:
+        {all_findings}
+        """
+
+        result = await self.agent_step(
             agent=self.writer_agent,
-            phase="writer",
+            instructions=prompt,
             span_name="writer_agent",
+            span_type="agent",
             printer_key="writer",
             printer_title="Writer",
-            extra=writer_extra,
         )
-        final_text = getattr(writer_result, "final_output", None) or getattr(writer_result, "output", None) or str(writer_result)
-        self.update_printer("research", "Research workflow complete", is_done=True)
-        return final_text
+
+        logger.info("Final response created successfully")
+        return result.final_output
 
     async def _finalise_research(self, research_report: str) -> None:
         """Finalize logging, persist conversation, and update memory."""
