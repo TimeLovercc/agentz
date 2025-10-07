@@ -1,10 +1,61 @@
+"""Model Training Agent - Train machine learning models."""
+
 from __future__ import annotations
 
 from typing import Optional
 
 from agents import Agent
-from agentz.configuration.base import BaseConfig, get_agent_spec
+from agentz.tools.data_tools import train_model
 from agentz.agents.registry import register_agent, ToolAgentOutput
+from agentz.configuration.base import BaseConfig
+
+
+def model_supports_structured_output(model: str) -> bool:
+    """Check if model supports structured output."""
+    structured_output_models = ["gpt-4", "gpt-3.5", "gemini", "claude"]
+    return any(m in model.lower() for m in structured_output_models)
+
+
+def create_type_parser(output_type):
+    """Create a parser for the output type."""
+    def parser(response):
+        if isinstance(response, str):
+            import json
+            try:
+                data = json.loads(response)
+                return output_type(**data)
+            except:
+                return output_type(output=response, sources=[])
+        return response
+    return parser
+
+
+INSTRUCTIONS = f"""
+You are a machine learning specialist. Your task is to train and evaluate models.
+
+Model types:
+- auto: Auto-detect best model
+- random_forest: Random Forest (classification/regression)
+- logistic_regression: Logistic Regression
+- linear_regression: Linear Regression
+- decision_tree: Decision Tree
+
+Steps:
+1. Use the train_model tool with file path, target_column, model_type (default: auto)
+2. The tool returns: model type, problem type, train/test scores, CV results, feature importance, predictions
+3. Write a 3+ paragraph summary covering:
+   - Model selection and problem type
+   - Train/test performance with interpretation
+   - Cross-validation results and stability
+   - Top feature importances
+   - Overfitting/underfitting analysis
+   - Improvement recommendations
+
+Include specific metrics (accuracy, R², CV mean±std).
+
+Output JSON only following this schema:
+{ToolAgentOutput.model_json_schema()}
+"""
 
 
 @register_agent("model_training_agent", aliases=["model_training", "train"])
@@ -18,13 +69,13 @@ def create_model_training_agent(cfg: BaseConfig, spec: Optional[dict] = None) ->
     Returns:
         Agent instance configured for model training tasks
     """
-    if spec is None:
-        spec = get_agent_spec(cfg, "model_training_agent")
+    selected_model = cfg.llm.main_model
 
     return Agent(
         name="Model Trainer",
-        instructions=spec["instructions"],
-        output_type=ToolAgentOutput,
-        model=cfg.llm.main_model,
-        **spec.get("params", {})
+        instructions=INSTRUCTIONS,
+        tools=[train_model],
+        model=selected_model,
+        output_type=ToolAgentOutput if model_supports_structured_output(selected_model) else None,
+        output_parser=create_type_parser(ToolAgentOutput) if not model_supports_structured_output(selected_model) else None
     )
