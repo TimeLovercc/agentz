@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 from pydantic import BaseModel, Field
-from loguru import logger
 
 from agents import Agent
 from agentz.configuration.base import BaseConfig, get_agent_spec
@@ -37,52 +36,10 @@ def create_routing_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
     if spec is None:
         spec = get_agent_spec(cfg, "routing_agent")
 
-    instructions = spec["instructions"]
-    params = spec.get("params", {})
-
-    agent = Agent(
+    return Agent(
         name="Task Router",
-        instructions=instructions,
+        instructions=spec["instructions"],
         output_type=AgentSelectionPlan,
         model=cfg.llm.main_model,
-        **params
+        **spec.get("params", {})
     )
-
-    # Add instruction template
-    agent.instructions_template = """{header}
-
-ORIGINAL QUERY:
-{query}
-
-{gap_block}
-
-HISTORY OF ACTIONS, FINDINGS AND THOUGHTS:
-{history}
-"""
-
-    # Add prepare_instructions method
-    def prepare_instructions(self, ctx: dict) -> str:
-        header = f"Iteration {ctx['iteration']} • Phase: {ctx.get('phase', 'route')}"
-        gap_block = f"KNOWLEDGE GAP TO ADDRESS:\n{ctx['gap']}\n" if ctx.get("gap") else "No specific gap provided.\n"
-        return self.instructions_template.format(
-            header=header,
-            query=ctx["query"],
-            gap_block=gap_block,
-            history=ctx["history"] or "No previous actions, findings or thoughts available.",
-        )
-
-    # Bind method to agent
-    import types
-    agent.prepare_instructions = types.MethodType(prepare_instructions, agent)
-
-    # Add emit rules
-    agent.emits: List[Dict[str, Any]] = [
-        {
-            "type": "tool_calls",
-            "source": "path",
-            "path": "tasks",
-            "format": "[Agent] {item.agent} [Query] {item.query} [Entity] {item.entity_website or 'null'}",
-        }
-    ]
-
-    return agent
