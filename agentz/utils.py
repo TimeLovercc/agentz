@@ -218,7 +218,7 @@ class Printer:
         self.live = Live(
             console=console,
             refresh_per_second=12,
-            vertical_overflow="visible",     # keep dashboard within viewport
+            vertical_overflow="ellipsis",     # keep dashboard within viewport
             screen=False,                  # keep using normal screen buffer
             transient=True,               # clear live view when stopping
         )
@@ -557,12 +557,17 @@ class Printer:
         if not last_title or not last_content:
             return None
 
-        # Truncate to first N lines to prevent long scrolling
+        # Truncate to first N lines and max characters to prevent long scrolling
         max_preview_lines = 12
+        max_preview_chars = 2000
         lines = last_content.splitlines()
         preview_text = "\n".join(lines[:max_preview_lines])
         if len(lines) > max_preview_lines:
             preview_text += "\n..."
+
+        # Also truncate by character count
+        if len(preview_text) > max_preview_chars:
+            preview_text = preview_text[:max_preview_chars] + "\n..."
 
         # Render the content using the same detection logic as log_panel
         preview_renderable = self._detect_and_render_body(preview_text)
@@ -570,7 +575,7 @@ class Printer:
         return Panel(
             preview_renderable,
             title=Text(f"Current Activity: {last_title}", style="bold cyan"),
-            border_style="dim cyan",
+            border_style="bright_black",
             padding=1,
             expand=True,
         )
