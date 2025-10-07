@@ -63,5 +63,4 @@ FINDINGS:
     # Add emit rules (writer does not update conversation by default)
     agent.emits: List[Dict[str, Any]] = []
 
-    logger.info("Created WriterAgent")
     return agent

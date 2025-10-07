@@ -241,6 +241,8 @@ class BasePipeline:
         sync: bool = False,
         printer_key: Optional[str] = None,
         printer_title: Optional[str] = None,
+        printer_group_id: Optional[str] = None,
+        printer_border_style: Optional[str] = None,
         **span_kwargs
     ) -> Any:
         """Run an agent with span tracking and optional output parsing.
@@ -256,6 +258,8 @@ class BasePipeline:
             sync: Whether to run synchronously
             printer_key: Optional key for printer updates (will be prefixed with iter:N:)
             printer_title: Optional title for printer display
+            printer_group_id: Optional group to nest this item in
+            printer_border_style: Optional border color
             **span_kwargs: Additional kwargs for span (e.g., tools, input)
 
         Returns:
@@ -270,6 +274,8 @@ class BasePipeline:
             sync=sync,
             printer_key=printer_key,
             printer_title=printer_title,
+            printer_group_id=printer_group_id,
+            printer_border_style=printer_border_style,
             **span_kwargs
         )
 
@@ -278,7 +284,10 @@ class BasePipeline:
         key: str,
         message: str,
         is_done: bool = False,
-        hide_checkmark: bool = False
+        hide_checkmark: bool = False,
+        title: Optional[str] = None,
+        border_style: Optional[str] = None,
+        group_id: Optional[str] = None,
     ) -> None:
         """Update printer status if printer is active.
 
@@ -289,8 +298,19 @@ class BasePipeline:
             message: Status message
             is_done: Whether the task is complete
             hide_checkmark: Whether to hide the checkmark when done
+            title: Optional panel title
+            border_style: Optional border color
+            group_id: Optional group to nest this item in
         """
-        self.execution_context.update_printer(key, message, is_done=is_done, hide_checkmark=hide_checkmark)
+        self.execution_context.update_printer(
+            key,
+            message,
+            is_done=is_done,
+            hide_checkmark=hide_checkmark,
+            title=title,
+            border_style=border_style,
+            group_id=group_id
+        )
 
     @contextmanager
     def run_context(self, additional_logging: Optional[Callable] = None):

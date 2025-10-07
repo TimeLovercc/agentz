@@ -67,5 +67,4 @@ HISTORY OF ACTIONS, FINDINGS AND THOUGHTS:
         {"type": "findings", "source": "final_text", "wrap_list": True, "when": _always_true},
     ]
 
-    logger.info("Created ModelTrainingAgent")
     return agent

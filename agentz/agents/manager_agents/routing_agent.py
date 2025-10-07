@@ -85,5 +85,4 @@ HISTORY OF ACTIONS, FINDINGS AND THOUGHTS:
         }
     ]
 
-    logger.info("Created RoutingAgent")
     return agent

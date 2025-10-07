@@ -69,5 +69,4 @@ HISTORY OF ACTIONS, FINDINGS AND THOUGHTS:
         {"type": "thought", "source": "final_text", "when": _always_true},
     ]
 
-    logger.info("Created ObserveAgent")
     return agent

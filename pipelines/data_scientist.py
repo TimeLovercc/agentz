@@ -7,6 +7,7 @@ from loguru import logger
 
 from agentz.agents.manager_agents.routing_agent import AgentTask
 from agentz.agents.registry import create_agents
+from agentz.flow import auto_trace
 from agentz.memory.global_memory import global_memory
 from agentz.memory.conversation import Conversation
 from pipelines.base import BasePipeline
@@ -36,6 +37,7 @@ class DataScientistPipeline(BasePipeline):
         self.tool_agents = create_agents(tool_agent_names, config)
         self.conversation = Conversation()
 
+    @auto_trace
     async def run(self):
         """Run the data analysis pipeline."""
         logger.info(f"Data path: {self.config.data_path}")
@@ -57,6 +59,14 @@ class DataScientistPipeline(BasePipeline):
             logger.info(f"Starting iteration {self.iteration}")
             self.conversation.add_iteration()
 
+            # Start iteration group
+            if self.printer:
+                self.printer.start_group(
+                    f"iter-{self.iteration}",
+                    title=f"Iteration {self.iteration}",
+                    border_style="white"
+                )
+
             await self._generate_observations(query=query)
             evaluation = await self._evaluate_research_state(query=query)
 
@@ -66,13 +76,28 @@ class DataScientistPipeline(BasePipeline):
                 selection_plan = await self._route_tasks(next_gap, query)
                 await self._execute_tools(selection_plan.tasks)
 
+                # End iteration group
+                if self.printer:
+                    self.printer.end_group(f"iter-{self.iteration}", is_done=True)
             else:
                 logger.info(f"Research marked complete by evaluation agent at iteration {self.iteration}")
+                # End iteration group before exiting
+                if self.printer:
+                    self.printer.end_group(f"iter-{self.iteration}", is_done=True)
                 self.should_continue = False
 
-            self.iteration += 1
+        # Create final report in its own group
+        if self.printer:
+            self.printer.start_group(
+                "iter-final",
+                title="Final Report",
+                border_style="white"
+            )
 
         research_report = await self._create_final_report()
+
+        if self.printer:
+            self.printer.end_group("iter-final", is_done=True)
 
         self.update_printer("research", "Research workflow complete", is_done=True)
         logger.info("Research workflow completed")
@@ -98,6 +123,7 @@ class DataScientistPipeline(BasePipeline):
             span_type="function",
             printer_key="observe",
             printer_title="Observations",
+            printer_group_id=f"iter-{self.iteration}",
         )
 
         # Store observations as thought in conversation
@@ -129,6 +155,7 @@ class DataScientistPipeline(BasePipeline):
             output_model=self.evaluate_agent.output_type,
             printer_key="evaluate",
             printer_title="Evaluation",
+            printer_group_id=f"iter-{self.iteration}",
         )
         
         evaluation = result
@@ -162,6 +189,7 @@ class DataScientistPipeline(BasePipeline):
             output_model=self.routing_agent.output_type,
             printer_key="route",
             printer_title="Routing",
+            printer_group_id=f"iter-{self.iteration}",
         )
 
         self.conversation.set_latest_tool_calls([
@@ -209,6 +237,7 @@ class DataScientistPipeline(BasePipeline):
                     span_type="tool",
                     printer_key=f"tool:{task.agent}",
                     printer_title=f"Tool: {task.agent}",
+                    printer_group_id=f"iter-{self.iteration}",
                 )
                 # Extract output from result
                 output = result.final_output if hasattr(result, 'final_output') else str(result)
@@ -252,6 +281,7 @@ class DataScientistPipeline(BasePipeline):
             span_type="agent",
             printer_key="writer",
             printer_title="Writer",
+            printer_group_id="iter-final",
         )
 
         logger.info("Final response created successfully")
@@ -271,4 +301,3 @@ class DataScientistPipeline(BasePipeline):
 
         logger.info(f"Stored research report with experiment_id {self.experiment_id}")
         self.update_printer("writer_agent", "Final report generated", is_done=True)
-

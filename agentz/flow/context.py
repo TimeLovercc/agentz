@@ -71,7 +71,10 @@ class ExecutionContext:
         key: str,
         message: str,
         is_done: bool = False,
-        hide_checkmark: bool = False
+        hide_checkmark: bool = False,
+        title: Optional[str] = None,
+        border_style: Optional[str] = None,
+        group_id: Optional[str] = None,
     ) -> None:
         """Update printer status if printer is active.
 
@@ -80,12 +83,23 @@ class ExecutionContext:
             message: Status message
             is_done: Whether the task is complete
             hide_checkmark: Whether to hide the checkmark when done
+            title: Optional panel title
+            border_style: Optional border color
+            group_id: Optional group to nest this item in
         """
         if self.printer:
-            self.printer.update_item(key, message, is_done=is_done, hide_checkmark=hide_checkmark)
+            self.printer.update_item(
+                key,
+                message,
+                is_done=is_done,
+                hide_checkmark=hide_checkmark,
+                title=title,
+                border_style=border_style,
+                group_id=group_id
+            )
 
 
-def with_run_context(additional_logging: Optional[Callable] = None):
+def auto_trace(additional_logging: Optional[Callable] = None):
     """Decorator that wraps async run method with automatic context management.
 
     Handles:
@@ -112,7 +126,7 @@ def with_run_context(additional_logging: Optional[Callable] = None):
                 self._stop_printer()
         return wrapper
 
-    # Support both @with_run_context and @with_run_context()
+    # Support both @auto_trace and @auto_trace()
     if callable(additional_logging):
         func = additional_logging
         additional_logging = None

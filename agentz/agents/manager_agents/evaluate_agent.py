@@ -79,5 +79,4 @@ HISTORY OF ACTIONS, FINDINGS AND THOUGHTS:
         }
     ]
 
-    logger.info("Created EvaluateAgent")
     return agent

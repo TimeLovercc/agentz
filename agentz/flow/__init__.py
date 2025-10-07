@@ -9,7 +9,7 @@ Core Components:
 - AgentStep: Abstraction for a single agent execution step
 
 Decorators:
-- with_run_context: Wraps run methods with context management
+- auto_trace: Wraps run methods with context management
 - with_span_step: Wraps functions with span context and printer updates
 
 Patterns:
@@ -21,7 +21,7 @@ Patterns:
 - PipelinePattern: Compose multiple patterns
 """
 
-from agentz.flow.context import ExecutionContext, with_run_context, with_span_step
+from agentz.flow.context import ExecutionContext, auto_trace, with_span_step
 from agentz.flow.executor import AgentExecutor, AgentStep, PrinterConfig
 from agentz.flow.patterns import (
     ConditionalPattern,
@@ -40,7 +40,7 @@ __all__ = [
     "AgentStep",
     "PrinterConfig",
     # Decorators
-    "with_run_context",
+    "auto_trace",
     "with_span_step",
     # Patterns
     "ExecutionPattern",
