@@ -10,26 +10,6 @@ from agentz.agents.registry import register_agent, ToolAgentOutput
 from agentz.configuration.base import BaseConfig
 
 
-def model_supports_structured_output(model: str) -> bool:
-    """Check if model supports structured output."""
-    structured_output_models = ["gpt-4", "gpt-3.5", "gemini", "claude"]
-    return any(m in model.lower() for m in structured_output_models)
-
-
-def create_type_parser(output_type):
-    """Create a parser for the output type."""
-    def parser(response):
-        if isinstance(response, str):
-            import json
-            try:
-                data = json.loads(response)
-                return output_type(**data)
-            except:
-                return output_type(output=response, sources=[])
-        return response
-    return parser
-
-
 INSTRUCTIONS = f"""
 You are a model evaluation specialist. Your task is to assess model performance comprehensively.
 
@@ -72,6 +52,5 @@ def create_evaluation_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Age
         instructions=INSTRUCTIONS,
         tools=[evaluate_model],
         model=selected_model,
-        output_type=ToolAgentOutput if model_supports_structured_output(selected_model) else None,
-        output_parser=create_type_parser(ToolAgentOutput) if not model_supports_structured_output(selected_model) else None
+        output_type=ToolAgentOutput
     )

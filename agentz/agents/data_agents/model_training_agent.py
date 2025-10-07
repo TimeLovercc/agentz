@@ -76,6 +76,5 @@ def create_model_training_agent(cfg: BaseConfig, spec: Optional[dict] = None) ->
         instructions=INSTRUCTIONS,
         tools=[train_model],
         model=selected_model,
-        output_type=ToolAgentOutput if model_supports_structured_output(selected_model) else None,
-        output_parser=create_type_parser(ToolAgentOutput) if not model_supports_structured_output(selected_model) else None
+        output_type=ToolAgentOutput
     )

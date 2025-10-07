@@ -9,7 +9,12 @@ dependencies = [
     "ipdb>=0.13.13",
     "litellm==1.76",
     "loguru>=0.7.3",
+    "matplotlib>=3.10.6",
+    "numpy>=2.3.3",
     "openai-agents>=0.3.2",
+    "pandas>=2.3.3",
     "rich>=14.1.0",
+    "scikit-learn>=1.7.2",
+    "seaborn>=0.13.2",
     "weave>=0.52.8",
 ]
