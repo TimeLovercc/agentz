@@ -230,6 +230,8 @@ class Printer:
 
         # Rich content produced by agents per iteration (title -> panel)
         self.iteration_sections: Dict[int, OrderedDict[str, Panel]] = {}
+        # Original content strings for creating previews (title -> content_string)
+        self.iteration_content: Dict[int, OrderedDict[str, str]] = {}
         self.iteration_order: List[int] = []
         self.finalized_iterations: Set[int] = set()
 
@@ -408,9 +410,11 @@ class Printer:
 
         if iteration is not None:
             sections = self.iteration_sections.setdefault(iteration, OrderedDict())
+            content_dict = self.iteration_content.setdefault(iteration, OrderedDict())
             if iteration not in self.iteration_order:
                 self.iteration_order.append(iteration)
             sections[title] = panel
+            content_dict[title] = content  # Store original content for previews
             if iteration in self.finalized_iterations:
                 self.finalized_iterations.discard(iteration)
             self._flush()
@@ -449,9 +453,9 @@ class Printer:
         Detection order:
         1. ANSI escape codes → Text.from_ansi
         2. Rich markup (e.g., [bold cyan]...[/]) → Text.from_markup
-        3. Code fences (```) → Markdown
-        4. JSON → Syntax highlighting
-        5. Code patterns → Markdown with code block
+        3. JSON → Syntax highlighting
+        4. Code patterns → Syntax highlighting
+        5. Markdown (headers, bold, bullets, code fences) → Markdown
         6. Plain text → Text
         """
         # Check for ANSI escape codes
@@ -463,10 +467,6 @@ class Printer:
         rich_markup_pattern = r'\[/?[a-z_]+(?:\s+[a-z_]+)*\]'
         if re.search(rich_markup_pattern, content, re.IGNORECASE):
             return Text.from_markup(content, emoji=True)
-
-        # Check for code fences
-        if '```' in content:
-            return Markdown(content, code_theme="monokai")
 
         # Check for JSON (starts with { or [, ends with } or ])
         stripped = content.strip()
@@ -496,6 +496,22 @@ class Printer:
                     return Syntax(content, "python", theme="monokai", line_numbers=False)
                 break
 
+        # Check for markdown patterns (more aggressive detection)
+        markdown_patterns = [
+            r'^\s*#{1,6}\s+',           # Headers
+            r'\*\*[^*]+\*\*',            # Bold
+            r'\*[^*]+\*',                # Italic
+            r'^\s*[\*\-\+]\s+',          # Unordered lists
+            r'^\s*\d+\.\s+',             # Ordered lists
+            r'```',                      # Code fences
+            r'\[.+\]\(.+\)',             # Links
+            r'^\s*>\s+',                 # Blockquotes
+        ]
+
+        for pattern in markdown_patterns:
+            if re.search(pattern, content, re.MULTILINE):
+                return Markdown(content, code_theme="monokai", inline_code_theme="monokai")
+
         # Default to plain text
         return Text(content)
 
@@ -518,6 +534,47 @@ class Printer:
             expand=True,
         )
 
+    def _build_activity_preview_panel(self, iteration: int) -> Optional[Panel]:
+        """Build a truncated preview panel showing only the current agent output.
+
+        Args:
+            iteration: The iteration number to preview
+
+        Returns:
+            A Panel with truncated preview of the most recent agent output, or None if no content
+        """
+        content_dict = self.iteration_content.get(iteration)
+        if not content_dict:
+            return None
+
+        # Get only the most recent section (last item in OrderedDict)
+        last_title = None
+        last_content = None
+        for title, content in content_dict.items():
+            last_title = title
+            last_content = content
+
+        if not last_title or not last_content:
+            return None
+
+        # Truncate to first N lines to prevent long scrolling
+        max_preview_lines = 12
+        lines = last_content.splitlines()
+        preview_text = "\n".join(lines[:max_preview_lines])
+        if len(lines) > max_preview_lines:
+            preview_text += "\n..."
+
+        # Render the content using the same detection logic as log_panel
+        preview_renderable = self._detect_and_render_body(preview_text)
+
+        return Panel(
+            preview_renderable,
+            title=Text(f"Current Activity: {last_title}", style="bold cyan"),
+            border_style="dim cyan",
+            padding=1,
+            expand=True,
+        )
+
     def _finalize_iteration(self, iteration: int) -> None:
         if iteration in self.finalized_iterations:
             return
@@ -526,6 +583,7 @@ class Printer:
             self.console.print(panel)
         self.finalized_iterations.add(iteration)
         self.iteration_sections.pop(iteration, None)
+        self.iteration_content.pop(iteration, None)  # Also clean up content storage
         if iteration in self.iteration_order:
             self.iteration_order.remove(iteration)
         self._flush()
@@ -636,8 +694,11 @@ class Printer:
         ]
         if active_iterations:
             current_iteration = max(active_iterations)
-            iteration_panel = self._build_iteration_panel(current_iteration)
-            if iteration_panel:
-                render_groups.append(iteration_panel)
 
-        # self.live.update(Group(*render_groups))
+            # Add truncated preview panel for current activity only
+            # (Full iteration panels are shown when finalized via _finalize_iteration)
+            preview_panel = self._build_activity_preview_panel(current_iteration)
+            if preview_panel:
+                render_groups.append(preview_panel)
+
+        self.live.update(Group(*render_groups))
