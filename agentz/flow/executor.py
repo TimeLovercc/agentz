@@ -7,7 +7,6 @@ from typing import Any, Callable, Dict, Optional, Union
 
 from agents import Runner
 from agents.tracing.create import agent_span, function_span
-from loguru import logger
 from pydantic import BaseModel
 
 from agentz.flow.context import ExecutionContext
