@@ -98,6 +98,23 @@ class ExecutionContext:
                 group_id=group_id
             )
 
+    def log_panel(
+        self,
+        title: str,
+        content: str,
+        *,
+        border_style: Optional[str] = None,
+        iteration: Optional[int] = None,
+    ) -> None:
+        """Proxy helper for rendering standalone panels via the printer."""
+        if self.printer:
+            self.printer.log_panel(
+                title,
+                content,
+                border_style=border_style,
+                iteration=iteration,
+            )
+
 
 def auto_trace(additional_logging: Optional[Callable] = None):
     """Decorator that wraps async run method with automatic context management.

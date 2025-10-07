@@ -9,13 +9,15 @@ import datetime
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from collections import OrderedDict
 
 import yaml
 from rich.console import Console, Group
 from rich.live import Live
-from rich.spinner import Spinner
 from rich.panel import Panel
 from rich.markdown import Markdown
+from rich.spinner import Spinner
+from rich.syntax import Syntax
 from rich.text import Text
 
 def setup_logging(log_level: str = "INFO", log_file: Optional[str] = None) -> logging.Logger:
@@ -216,15 +218,20 @@ class Printer:
         self.live = Live(
             console=console,
             refresh_per_second=12,
-            vertical_overflow="visible",   # <-- key change: no height cropping
+            vertical_overflow="visible",     # keep dashboard within viewport
             screen=False,                  # keep using normal screen buffer
-            transient=False,               # keep contents after stopping
+            transient=True,               # clear live view when stopping
         )
 
         # items: id -> (content, is_done, title, border_style, group_id)
         self.items: Dict[str, Tuple[str, bool, Optional[str], Optional[str], Optional[str]]] = {}
         # Track which items should hide the done checkmark
         self.hide_done_ids: Set[str] = set()
+
+        # Rich content produced by agents per iteration (title -> panel)
+        self.iteration_sections: Dict[int, OrderedDict[str, Panel]] = {}
+        self.iteration_order: List[int] = []
+        self.finalized_iterations: Set[int] = set()
 
         # Group management
         self.group_order: List[str] = []  # Order of groups
@@ -286,6 +293,11 @@ class Printer:
             # Update border style to bright_white when done
             if is_done and self.groups[group_id]["border_style"] == "white":
                 self.groups[group_id]["border_style"] = "bright_white"
+
+        iteration = self._extract_iteration_index(group_id)
+        if iteration is not None and is_done:
+            self._finalize_iteration(iteration)
+        else:
             self._flush()
 
     def update_item(
@@ -361,18 +373,75 @@ class Printer:
             )
             self._flush()
 
+    def log_panel(
+        self,
+        title: str,
+        content: str,
+        *,
+        border_style: Optional[str] = None,
+        iteration: Optional[int] = None,
+    ) -> None:
+        """Render a standalone panel outside the live dashboard.
+
+        Useful for persisting rich text output to the terminal while keeping the
+        live printer focused on lightweight status updates.
+        """
+        # content = self._truncate_content(content)
+
+        if border_style is None:
+            title_lower = title.lower().strip()
+            if title_lower in self.DEFAULT_BORDER_COLORS:
+                border_style = self.DEFAULT_BORDER_COLORS[title_lower]
+            else:
+                for key, color in self.DEFAULT_BORDER_COLORS.items():
+                    if key in title_lower:
+                        border_style = color
+                        break
+
+        panel = Panel(
+            self._detect_and_render_body(content),
+            title=Text(title),
+            border_style=border_style or "cyan",
+            padding=(1, 2),
+            expand=True,
+        )
+
+        if iteration is not None:
+            sections = self.iteration_sections.setdefault(iteration, OrderedDict())
+            if iteration not in self.iteration_order:
+                self.iteration_order.append(iteration)
+            sections[title] = panel
+            if iteration in self.finalized_iterations:
+                self.finalized_iterations.discard(iteration)
+            self._flush()
+        else:
+            self.live.console.print(panel)
+
     # ------------ internals ------------
 
-    def _render_title(self, item_id: str, is_done: bool, title: Optional[str]) -> Text:
-        """Render panel title with optional checkmark."""
-        base = title or item_id
-        if is_done and item_id not in self.hide_done_ids:
-            # checkmark in the panel title
-            return Text(f"✅ {base}")
-        elif not is_done:
-            # no checkmark while running; spinner is rendered above the panel
-            return Text(base)
-        return Text(base)
+    def _truncate_content(self, content: str) -> str:
+        """Limit panel body length so it fits comfortably in a terminal window."""
+        max_lines = 40
+        max_cols = 120
+        lines = content.splitlines()
+        truncated: List[str] = []
+
+        for idx, line in enumerate(lines):
+            shortened = line
+            if len(shortened) > max_cols:
+                shortened = shortened[: max_cols - 1].rstrip() + "…"
+            truncated.append(shortened)
+            if idx + 1 >= max_lines:
+                if idx + 1 < len(lines):
+                    truncated.append("…")
+                break
+
+        result = "\n".join(truncated)
+
+        # Ensure code fences remain balanced after truncation
+        if result.count("```") % 2 == 1:
+            result += "\n```"
+        return result
 
     def _detect_and_render_body(self, content: str) -> Any:
         """Auto-detect content type and render with appropriate Rich object.
@@ -381,7 +450,9 @@ class Printer:
         1. ANSI escape codes → Text.from_ansi
         2. Rich markup (e.g., [bold cyan]...[/]) → Text.from_markup
         3. Code fences (```) → Markdown
-        4. Plain text → Text
+        4. JSON → Syntax highlighting
+        5. Code patterns → Markdown with code block
+        6. Plain text → Text
         """
         # Check for ANSI escape codes
         ansi_pattern = r'\x1b\[[0-9;]*m'
@@ -397,23 +468,67 @@ class Printer:
         if '```' in content:
             return Markdown(content, code_theme="monokai")
 
+        # Check for JSON (starts with { or [, ends with } or ])
+        stripped = content.strip()
+        if (stripped.startswith('{') and stripped.endswith('}')) or \
+           (stripped.startswith('[') and stripped.endswith(']')):
+            try:
+                json.loads(stripped)  # Validate it's valid JSON
+                return Syntax(content, "json", theme="monokai", line_numbers=False)
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        # Check for common code patterns (imports, function definitions, etc.)
+        code_patterns = [
+            r'^\s*import\s+',
+            r'^\s*from\s+.+\s+import\s+',
+            r'^\s*def\s+\w+\s*\(',
+            r'^\s*class\s+\w+',
+            r'^\s*async\s+def\s+',
+            r'^\s*@\w+',
+            r'^\s*if\s+__name__\s*==',
+        ]
+
+        for pattern in code_patterns:
+            if re.search(pattern, content, re.MULTILINE):
+                # Detect language
+                if re.search(r'^\s*(import|from|def|class|async)', content, re.MULTILINE):
+                    return Syntax(content, "python", theme="monokai", line_numbers=False)
+                break
+
         # Default to plain text
         return Text(content)
 
-    def _get_border_color(self, is_done: bool, border_style: Optional[str]) -> str:
-        """Determine border color for an item.
+    def _extract_iteration_index(self, group_id: str) -> Optional[int]:
+        match = re.fullmatch(r"iter-(\d+)", group_id)
+        if match:
+            return int(match.group(1))
+        return None
 
-        Args:
-            is_done: Whether the item is complete
-            border_style: Explicitly provided border style
+    def _build_iteration_panel(self, iteration: int) -> Optional[Panel]:
+        sections = self.iteration_sections.get(iteration)
+        if not sections:
+            return None
+        section_group = Group(*sections.values())
+        return Panel(
+            section_group,
+            title=Text(f"Iteration {iteration}"),
+            border_style="bright_white",
+            padding=1,
+            expand=True,
+        )
 
-        Returns:
-            Border style string
-        """
-        if border_style:
-            return border_style
-        # Default colors if no style provided
-        return "cyan" if not is_done else "green"
+    def _finalize_iteration(self, iteration: int) -> None:
+        if iteration in self.finalized_iterations:
+            return
+        panel = self._build_iteration_panel(iteration)
+        if panel:
+            self.console.print(panel)
+        self.finalized_iterations.add(iteration)
+        self.iteration_sections.pop(iteration, None)
+        if iteration in self.iteration_order:
+            self.iteration_order.remove(iteration)
+        self._flush()
 
     def _render_item(
         self,
@@ -421,21 +536,41 @@ class Printer:
         content: str,
         is_done: bool,
         title: Optional[str],
-        border_style: Optional[str]
+        *,
+        indent: int = 0,
     ) -> Any:
-        """Render a single item as a Panel with optional spinner."""
-        panel = Panel(
-            self._detect_and_render_body(content),
-            title=self._render_title(item_id, is_done, title),
-            border_style=self._get_border_color(is_done, border_style),
-            padding=(1, 2),
-            expand=True,
-        )
-        if is_done:
-            return panel
-        # For in-progress, show a spinner stacked above the panel
-        spin = Spinner("dots", text=Text("Working…"))
-        return Group(spin, panel)
+        """Render a single status line without surrounding boxes."""
+        prefix = "✓" if is_done and item_id not in self.hide_done_ids else ("•" if is_done else "…")
+        indent_str = " " * (indent * 2)
+        lines = str(content).splitlines() or [""]
+
+        label = title or item_id
+        primary = lines[0].strip()
+        if label and primary:
+            display_text = f"{label}: {primary}"
+        elif label:
+            display_text = label
+        elif primary:
+            display_text = primary
+        else:
+            display_text = title or item_id or ""
+
+        if not is_done:
+            spinner_text = Text(f"{indent_str}{display_text}")
+            spinner = Spinner("dots", text=spinner_text)
+            if len(lines) == 1:
+                return spinner
+            continuation = [Text(f"{indent_str}  {line}") for line in lines[1:]]
+            return Group(spinner, *continuation)
+
+        headline = f"{indent_str}{prefix} {display_text}".rstrip()
+        if not display_text:
+            headline = f"{indent_str}{prefix}"
+        first_line = Text(headline)
+        if len(lines) == 1:
+            return first_line
+        continuation = [Text(f"{indent_str}  {line}") for line in lines[1:]]
+        return Group(first_line, *continuation)
 
     def _render_group(self, group_id: str) -> Any:
         """Render a group panel containing its child section panels.
@@ -447,29 +582,19 @@ class Printer:
             A Panel containing Group of child panels
         """
         group = self.groups[group_id]
-        group_items = []
+        group_items: List[Any] = []
 
         # Render items in the order they were added to this group
         for item_id in group["order"]:
             if item_id in self.items:
-                content, is_done, title, border_style, _ = self.items[item_id]
+                content, is_done, title, _border_style, _ = self.items[item_id]
                 group_items.append(
-                    self._render_item(item_id, content, is_done, title, border_style)
+                    self._render_item(item_id, content, is_done, title, indent=1)
                 )
 
-        # Create group title with checkmark if done
-        group_title = group["title"]
-        if group["is_done"]:
-            group_title = f"✅ {group_title}"
-
-        # Create panel containing all group items
-        return Panel(
-            Group(*group_items) if group_items else Text(""),
-            title=Text(group_title),
-            border_style=group["border_style"],
-            padding=(1, 2),
-            expand=True,
-        )
+        status_symbol = "✓" if group["is_done"] else "…"
+        header = Text(f"{status_symbol} {group['title']}")
+        return Group(header, *(group_items or [Text("  (no activity)")]))
 
     def _flush(self) -> None:
         """Re-render the live view with the latest status items."""
@@ -478,10 +603,10 @@ class Printer:
         # Render top-level items (those without group_id)
         for item_id in self.item_order:
             if item_id in self.items:
-                content, is_done, title, border_style, group_id = self.items[item_id]
+                content, is_done, title, _border_style, group_id = self.items[item_id]
                 if group_id is None:
                     renderables.append(
-                        self._render_item(item_id, content, is_done, title, border_style)
+                        self._render_item(item_id, content, is_done, title)
                     )
 
         # Render groups in order
@@ -489,4 +614,30 @@ class Printer:
             if group_id in self.groups:
                 renderables.append(self._render_group(group_id))
 
-        self.live.update(Group(*renderables) if renderables else Group())
+        render_groups: List[Any] = []
+
+        # Status panel containing live progress lines
+        status_body = Group(*renderables) if renderables else Text("No status yet")
+        status_panel = Panel(
+            status_body,
+            title=Text("Status", style="bold"),
+            border_style="bright_black",
+            padding=(0, 1),
+            expand=True,
+        )
+        render_groups.append(status_panel)
+
+        # Show only the latest active iteration inside the live view
+        active_iterations = [
+            iteration
+            for iteration in self.iteration_order
+            if iteration not in self.finalized_iterations
+            and self.iteration_sections.get(iteration)
+        ]
+        if active_iterations:
+            current_iteration = max(active_iterations)
+            iteration_panel = self._build_iteration_panel(current_iteration)
+            if iteration_panel:
+                render_groups.append(iteration_panel)
+
+        # self.live.update(Group(*render_groups))

@@ -135,8 +135,14 @@ class BasePipeline:
     @property
     def executor(self) -> AgentExecutor:
         """Get or create the agent executor."""
+        # Refresh execution context so iteration/printer stay in sync across loops
+        context = self.execution_context
+
         if self._executor is None:
-            self._executor = AgentExecutor(self.execution_context)
+            self._executor = AgentExecutor(context)
+        else:
+            # Executor holds a reference to the context; update it in case it changed
+            self._executor.context = context
         return self._executor
 
     def start_printer(self) -> Printer:

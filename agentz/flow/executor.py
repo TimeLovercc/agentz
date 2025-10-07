@@ -1,6 +1,7 @@
 """Core agent execution primitives."""
 
 import asyncio
+import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional, Union
 
@@ -141,6 +142,17 @@ class AgentExecutor:
         """
         span_factory = agent_span if span_type == "agent" else function_span
 
+        full_printer_key: Optional[str] = None
+        if printer_key and self.context.printer:
+            full_printer_key = f"iter:{self.context.iteration}:{printer_key}"
+            self.context.printer.update_item(
+                full_printer_key,
+                "Working...",
+                title=printer_title or printer_key,
+                border_style=printer_border_style,
+                group_id=printer_group_id,
+            )
+
         with self.context.span_context(span_factory, name=span_name, **span_kwargs) as span:
             if sync:
                 result = Runner.run_sync(agent, instructions)
@@ -149,21 +161,36 @@ class AgentExecutor:
 
             raw_output = getattr(result, "final_output", result)
 
-            # Print output preview if printer_key is provided
-            if printer_key and self.context.printer:
-                full_key = f"iter:{self.context.iteration}:{printer_key}"
-                preview = str(raw_output)
-                if len(preview) > 600:
-                    preview = preview[:600] + "..."
-
+            # Update printer status and emit detailed output as a standalone panel
+            if full_printer_key and self.context.printer:
                 self.context.printer.update_item(
-                    full_key,
-                    preview,
+                    full_printer_key,
+                    "Completed",
                     is_done=True,
                     title=printer_title or printer_key,
                     group_id=printer_group_id,
-                    border_style=printer_border_style
+                    border_style=printer_border_style,
                 )
+
+                # Extract content from raw_output
+                if hasattr(raw_output, 'output'):
+                    panel_content = str(raw_output.output)
+                elif isinstance(raw_output, BaseModel):
+                    panel_content = raw_output.model_dump_json(indent=2)
+                elif isinstance(raw_output, dict):
+                    panel_content = json.dumps(raw_output, indent=2)
+                else:
+                    panel_content = str(raw_output)
+
+                if len(panel_content) > 4000:
+                    panel_content = panel_content[:4000] + "\n..."
+                if panel_content.strip():
+                    self.context.log_panel(
+                        printer_title or printer_key,
+                        panel_content,
+                        border_style=printer_border_style,
+                        iteration=self.context.iteration,
+                    )
 
             if output_model:
                 if isinstance(raw_output, output_model):
