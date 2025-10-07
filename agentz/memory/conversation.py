@@ -9,11 +9,13 @@ class IterationData(BaseModel):
     tool_calls: List[str] = Field(description="The tool calls made", default_factory=list)
     findings: List[str] = Field(description="The findings collected from tool calls", default_factory=list)
     thought: List[str] = Field(description="The thinking done to reflect on the success of the iteration and next steps", default_factory=list)
+    summarized: bool = Field(description="Whether the iteration has been summarized", default=False)
 
 
 class Conversation(BaseModel):
     """A conversation between the user and the iterative researcher."""
     history: List[IterationData] = Field(description="The data for each iteration of the research loop", default_factory=list)
+    summary: str = Field(description="The summary of the conversation", default_factory=list)
 
     def add_iteration(self, iteration_data: Optional[IterationData] = None):
         if iteration_data is None:
@@ -62,6 +64,39 @@ class Conversation(BaseModel):
                 conversation += f"{self.get_findings_string(iteration_num)}\n\n"
 
         return conversation
+
+    def compile_unsummarized_conversation_history(self) -> str:
+        """Compile the conversation history into a string."""
+        conversation = ""
+        for iteration_num, iteration_data in enumerate(self.history):
+            if not iteration_data.summarized:
+                conversation += f"[ITERATION {iteration_num + 1}]\n\n"
+                if iteration_data.thought:
+                    conversation += f"{self.get_thought_string(iteration_num)}\n\n"
+                if iteration_data.gap:
+                    conversation += f"{self.get_task_string(iteration_num)}\n\n"
+                if iteration_data.tool_calls:
+                    conversation += f"{self.get_action_string(iteration_num)}\n\n"
+                if iteration_data.findings:
+                    conversation += f"{self.get_findings_string(iteration_num)}\n\n"
+        return conversation
+    
+    def compile_conversation_history_with_summary(self) -> str:
+        """Compile the conversation history into a string."""
+        summary = self.get_latest_summary()
+        conversation = f"[SUMMARY BEFORE NEW ITERATION]\n\n{summary}\n\n"
+        conversation += self.compile_unsummarized_conversation_history()
+        return conversation
+
+    def get_latest_summary(self) -> str:
+        """Get the latest summary."""
+        return self.summary
+    
+    def set_latest_summary(self, summary: str):
+        """Set the latest summary."""
+        self.summary = summary
+        for iteration_data in self.history:
+            iteration_data.summarized = True
 
     def get_task_string(self, iteration_num: int) -> str:
         """Get the task for the current iteration."""
