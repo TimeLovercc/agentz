@@ -10,6 +10,7 @@ from agentz.agents.registry import create_agents
 from agentz.flow import auto_trace
 from agentz.memory.global_memory import global_memory
 from agentz.memory.conversation import Conversation
+from agentz.agents.registry import ToolAgentOutput
 from pipelines.base import BasePipeline
 
 class DataScientistPipeline(BasePipeline):
@@ -32,7 +33,6 @@ class DataScientistPipeline(BasePipeline):
             "model_training_agent",
             "evaluation_agent",
             "visualization_agent",
-            "code_generation_agent",
         ]
         self.tool_agents = create_agents(tool_agent_names, config)
         self.conversation = Conversation()
@@ -240,13 +240,20 @@ class DataScientistPipeline(BasePipeline):
                     printer_group_id=f"iter-{self.iteration}",
                 )
                 # Extract output from result
-                output = result.final_output if hasattr(result, 'final_output') else str(result)
+                # output = result.final_output if hasattr(result, 'final_output') else str(result)
+                output = result
             else:
-                output = f"No implementation found for agent {agent_name}"
+                output = ToolAgentOutput(
+                    output=f"No implementation found for agent {agent_name}",
+                    sources=[]
+                )
 
             return task.gap, agent_name, output
         except Exception as e:
-            error_output = f"Error executing {task.agent} for gap '{task.gap}': {str(e)}"
+            error_output = ToolAgentOutput(
+                output=f"Error executing {task.agent} for gap '{task.gap}': {str(e)}",
+                sources=[]
+            )
             return task.gap, task.agent, error_output
 
     async def _create_final_report(
