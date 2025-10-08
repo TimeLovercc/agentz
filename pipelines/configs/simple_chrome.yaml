@@ -1,0 +1,38 @@
+# Simple Pipeline Configuration - Two Agent Pipeline
+
+# Provider configuration
+provider: "gemini"
+model: "gemini-2.5-flash"
+api_key: "${GEMINI_API_KEY}"
+
+
+prompt: |
+  Open www.google.com and search for "openai agents sdk". Return the title of the first result.
+
+# Pipeline settings
+pipeline:
+  verbose: true
+
+# Agent instructions
+agents:
+  routing_agent:
+    instructions: |
+      You are a task routing agent. Analyze the user query and create a task for the chrome_agent.
+
+      The chrome_agent can:
+      - Interact with the chrome browser
+      - Search the web
+      - Click on links
+      - Read the content of the page
+      - Click on buttons
+      - Fill out forms
+      - Submit forms
+
+      Create a clear, specific task with:
+      - agent: "chrome_agent"
+      - query: detailed task description
+      - gap: the knowledge gap being addressed
+      
+  chrome_agent:
+    instructions: |
+      You are a chrome agent. Interact with the chrome browser MCP Server following the instructions provided to complete the task.
