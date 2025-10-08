@@ -1,12 +1,21 @@
 """Execution context management for agent runtime operations."""
 
 import asyncio
-from contextlib import nullcontext
+from contextlib import nullcontext, contextmanager
+from contextvars import ContextVar
 from functools import wraps
 from typing import Any, Callable, Dict, Optional
 
 from agents.tracing.create import agent_span, function_span, trace
 from agentz.utils import Printer
+from agentz.memory.pipeline_context import PipelineDataStore
+
+# Context variable to store the current execution context
+# This allows tools to access the context without explicit parameter passing
+_current_execution_context: ContextVar[Optional['ExecutionContext']] = ContextVar(
+    'current_execution_context',
+    default=None
+)
 
 
 class ExecutionContext:
@@ -16,6 +25,7 @@ class ExecutionContext:
     - Tracing configuration and context creation
     - Printer for status updates
     - Iteration tracking
+    - Pipeline-scoped data store for sharing objects between agents
     """
 
     def __init__(
@@ -23,7 +33,8 @@ class ExecutionContext:
         printer: Optional[Printer] = None,
         enable_tracing: bool = True,
         trace_sensitive: bool = False,
-        iteration: int = 0
+        iteration: int = 0,
+        experiment_id: Optional[str] = None
     ):
         """Initialize execution context.
 
@@ -32,11 +43,13 @@ class ExecutionContext:
             enable_tracing: Whether tracing is enabled
             trace_sensitive: Whether to include sensitive data in traces
             iteration: Current iteration number (for iterative workflows)
+            experiment_id: Optional experiment ID for data store tracking
         """
         self.printer = printer
         self.enable_tracing = enable_tracing
         self.trace_sensitive = trace_sensitive
         self.iteration = iteration
+        self.data_store = PipelineDataStore(experiment_id=experiment_id)
 
     def trace_context(self, name: str, metadata: Optional[Dict[str, Any]] = None):
         """Create a trace context manager.
@@ -114,6 +127,44 @@ class ExecutionContext:
                 border_style=border_style,
                 iteration=iteration,
             )
+
+    @contextmanager
+    def activate(self):
+        """Context manager to set this context as the current execution context.
+
+        This allows tools to access the context via get_current_context().
+
+        Example:
+            with context.activate():
+                # Tools can now access this context
+                result = await agent.run(...)
+        """
+        token = _current_execution_context.set(self)
+        try:
+            yield self
+        finally:
+            _current_execution_context.reset(token)
+
+
+def get_current_context() -> Optional[ExecutionContext]:
+    """Get the current execution context (if any).
+
+    Returns:
+        The current ExecutionContext or None if not in an execution context
+    """
+    return _current_execution_context.get()
+
+
+def get_current_data_store() -> Optional[PipelineDataStore]:
+    """Get the data store from the current execution context (if any).
+
+    This is a convenience function for tools that need to access the data store.
+
+    Returns:
+        The current PipelineDataStore or None if not in an execution context
+    """
+    context = get_current_context()
+    return context.data_store if context else None
 
 
 def auto_trace(additional_logging: Optional[Callable] = None):

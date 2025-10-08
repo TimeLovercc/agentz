@@ -12,21 +12,25 @@ from sklearn.metrics import (
     mean_squared_error, mean_absolute_error, r2_score
 )
 from agents import function_tool
+from .helpers import get_current_dataset, load_or_get_dataframe, get_cached_object
 
 
 @function_tool
 async def evaluate_model(
-    file_path: str,
     target_column: str,
+    file_path: Optional[str] = None,
     model_type: str = "random_forest",
     test_size: float = 0.2,
     random_state: int = 42
 ) -> Union[Dict[str, Any], str]:
     """Evaluates machine learning model performance with comprehensive metrics.
 
+    This tool automatically uses the current dataset from the pipeline context.
+    A file_path can optionally be provided to evaluate on a different dataset.
+
     Args:
-        file_path: Path to the dataset file
         target_column: Name of the target column to predict
+        file_path: Optional path to dataset file. If not provided, uses current dataset.
         model_type: Type of model to evaluate (random_forest, decision_tree, etc.)
         test_size: Proportion of data to use for testing (default: 0.2)
         random_state: Random seed for reproducibility (default: 42)
@@ -42,20 +46,15 @@ async def evaluate_model(
         Or error message string if evaluation fails
     """
     try:
-        file_path = Path(file_path)
-
-        if not file_path.exists():
-            return f"File not found: {file_path}"
-
-        # Load dataset
-        if file_path.suffix.lower() == '.csv':
-            df = pd.read_csv(file_path)
-        elif file_path.suffix.lower() in ['.xlsx', '.xls']:
-            df = pd.read_excel(file_path)
-        elif file_path.suffix.lower() == '.json':
-            df = pd.read_json(file_path)
+        # Get DataFrame - either from file_path or current dataset
+        if file_path is None:
+            df = get_current_dataset()
+            if df is None:
+                return "Error: No dataset loaded. Please load a dataset first using the load_dataset tool."
+            logger.info("Evaluating model on current dataset from pipeline context")
         else:
-            return f"Unsupported file format: {file_path.suffix}"
+            df = load_or_get_dataframe(file_path, prefer_preprocessed=True)
+            logger.info(f"Evaluating model on dataset from: {file_path}")
 
         if target_column not in df.columns:
             return f"Target column '{target_column}' not found in dataset"

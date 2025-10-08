@@ -153,10 +153,12 @@ class AgentExecutor:
             )
 
         with self.context.span_context(span_factory, name=span_name, **span_kwargs) as span:
-            if sync:
-                result = Runner.run_sync(agent, instructions)
-            else:
-                result = await Runner.run(agent, instructions)
+            # Activate context so tools can access it
+            with self.context.activate():
+                if sync:
+                    result = Runner.run_sync(agent, instructions)
+                else:
+                    result = await Runner.run(agent, instructions)
 
             raw_output = getattr(result, "final_output", result)
 

@@ -1,4 +1,4 @@
-"""Data visualization tool for creating charts and plots."""
+        agentz/memory/pipeline_context.py"""Data visualization tool for creating charts and plots."""
 
 from typing import Union, Dict, Any, Optional, List
 from pathlib import Path
@@ -9,20 +9,24 @@ import seaborn as sns
 import base64
 from io import BytesIO
 from agents import function_tool
+from .helpers import get_current_dataset, load_or_get_dataframe
+from loguru import logger
 
 
 @function_tool
 async def create_visualization(
-    file_path: str,
     plot_type: str,
+    file_path: Optional[str] = None,
     columns: Optional[List[str]] = None,
     target_column: Optional[str] = None,
     output_path: Optional[str] = None
 ) -> Union[Dict[str, Any], str]:
     """Creates data visualizations from a dataset.
 
+    This tool automatically uses the current dataset from the pipeline context.
+    A file_path can optionally be provided to visualize a different dataset.
+
     Args:
-        file_path: Path to the dataset file
         plot_type: Type of visualization to create. Options:
             - "distribution": Histogram/distribution plots for numerical columns
             - "correlation": Correlation heatmap
@@ -30,6 +34,7 @@ async def create_visualization(
             - "box": Box plot for outlier detection
             - "bar": Bar chart for categorical data
             - "pairplot": Pairwise relationships plot
+        file_path: Optional path to dataset file. If not provided, uses current dataset.
         columns: List of columns to visualize (optional, uses all if not specified)
         target_column: Target column for colored scatter/pair plots
         output_path: Path to save the visualization (PNG format)
@@ -44,20 +49,15 @@ async def create_visualization(
         Or error message string if visualization fails
     """
     try:
-        file_path = Path(file_path)
-
-        if not file_path.exists():
-            return f"File not found: {file_path}"
-
-        # Load dataset
-        if file_path.suffix.lower() == '.csv':
-            df = pd.read_csv(file_path)
-        elif file_path.suffix.lower() in ['.xlsx', '.xls']:
-            df = pd.read_excel(file_path)
-        elif file_path.suffix.lower() == '.json':
-            df = pd.read_json(file_path)
+        # Get DataFrame - either from file_path or current dataset
+        if file_path is None:
+            df = get_current_dataset()
+            if df is None:
+                return "Error: No dataset loaded. Please load a dataset first using the load_dataset tool."
+            logger.info("Creating visualization from current dataset in pipeline context")
         else:
-            return f"Unsupported file format: {file_path.suffix}"
+            df = load_or_get_dataframe(file_path, prefer_preprocessed=False)
+            logger.info(f"Creating visualization from dataset: {file_path}")
 
         # Set style
         sns.set_style("whitegrid")

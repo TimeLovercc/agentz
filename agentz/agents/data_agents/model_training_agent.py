@@ -24,7 +24,10 @@ Model types:
 - decision_tree: Decision Tree
 
 Steps:
-1. Use the train_model tool with file path, target_column, model_type (default: auto)
+1. Use the train_model tool (it automatically uses the currently loaded dataset)
+   - Required: target_column (which column to predict)
+   - Optional: model_type (default: auto)
+   - The tool will train on the dataset that was previously loaded/preprocessed
 2. The tool returns: model type, problem type, train/test scores, CV results, feature importance, predictions
 3. Write a 3+ paragraph summary covering:
    - Model selection and problem type

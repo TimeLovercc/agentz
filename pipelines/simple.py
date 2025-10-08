@@ -66,10 +66,11 @@ class SimplePipeline(BasePipeline):
             printer_key="tool",
             printer_title=f"Tool: {task.agent}",
         )
-        import ipdb
-        ipdb.set_trace()
+        # import ipdb
+        # ipdb.set_trace()
 
         # self.update_printer("tool", f"Completed {task.agent}", is_done=True)
 
         logger.info("Simple pipeline completed")
         return result
+    

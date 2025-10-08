@@ -16,7 +16,9 @@ INSTRUCTIONS = f"""
 You are an exploratory data analysis specialist. Your task is to analyze data patterns and relationships.
 
 Steps:
-1. Use the analyze_data tool with the file path (and target_column if provided)
+1. Use the analyze_data tool (it automatically uses the currently loaded dataset)
+   - If a target_column is mentioned in the task, pass it as a parameter
+   - The tool will analyze the dataset that was previously loaded
 2. The tool returns: distributions, correlations, outliers (IQR method), patterns, recommendations
 3. Write a 3+ paragraph summary covering:
    - Key statistical insights (means, medians, distributions)

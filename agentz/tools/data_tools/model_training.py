@@ -10,21 +10,25 @@ from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.metrics import accuracy_score, mean_squared_error, r2_score
 from agents import function_tool
+from .helpers import get_current_dataset, load_or_get_dataframe, cache_object
 
 
 @function_tool
 async def train_model(
-    file_path: str,
     target_column: str,
+    file_path: Optional[str] = None,
     model_type: str = "auto",
     test_size: float = 0.2,
     random_state: int = 42
 ) -> Union[Dict[str, Any], str]:
     """Trains machine learning models on a dataset.
 
+    This tool automatically uses the current dataset from the pipeline context.
+    A file_path can optionally be provided to train on a different dataset.
+
     Args:
-        file_path: Path to the dataset file
         target_column: Name of the target column to predict
+        file_path: Optional path to dataset file. If not provided, uses current dataset.
         model_type: Type of model to train. Options:
             - "auto": Automatically detect and use best model
             - "random_forest": Random Forest
@@ -46,20 +50,15 @@ async def train_model(
         Or error message string if training fails
     """
     try:
-        file_path = Path(file_path)
-
-        if not file_path.exists():
-            return f"File not found: {file_path}"
-
-        # Load dataset
-        if file_path.suffix.lower() == '.csv':
-            df = pd.read_csv(file_path)
-        elif file_path.suffix.lower() in ['.xlsx', '.xls']:
-            df = pd.read_excel(file_path)
-        elif file_path.suffix.lower() == '.json':
-            df = pd.read_json(file_path)
+        # Get DataFrame - either from file_path or current dataset
+        if file_path is None:
+            df = get_current_dataset()
+            if df is None:
+                return "Error: No dataset loaded. Please load a dataset first using the load_dataset tool."
+            logger.info("Training model on current dataset from pipeline context")
         else:
-            return f"Unsupported file format: {file_path.suffix}"
+            df = load_or_get_dataframe(file_path, prefer_preprocessed=True)
+            logger.info(f"Training model on dataset from: {file_path}")
 
         if target_column not in df.columns:
             return f"Target column '{target_column}' not found in dataset"
@@ -149,6 +148,21 @@ async def train_model(
                 "actual": float(y_test.iloc[i]) if hasattr(y_test, 'iloc') else float(y_test[i]),
                 "predicted": float(test_pred[i]),
             })
+
+        # Cache the trained model for reuse
+        file_path_obj = Path(file_path)
+        model_key = f"model:{file_path_obj.resolve()}"
+        cache_object(
+            model_key,
+            model,
+            data_type="model",
+            metadata={
+                "file_path": str(file_path),
+                "model_type": model_name,
+                "target_column": target_column,
+                "test_score": float(test_score)
+            }
+        )
 
         result = {
             "model_type": model_name,

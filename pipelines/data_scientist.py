@@ -240,8 +240,7 @@ class DataScientistPipeline(BasePipeline):
                     printer_group_id=f"iter-{self.iteration}",
                 )
                 # Extract output from result
-                # output = result.final_output if hasattr(result, 'final_output') else str(result)
-                output = result
+                output = result.final_output_as(ToolAgentOutput)
             else:
                 output = ToolAgentOutput(
                     output=f"No implementation found for agent {agent_name}",

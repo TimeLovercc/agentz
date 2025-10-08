@@ -6,19 +6,24 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder
 from agents import function_tool
+from .helpers import get_current_dataset, load_or_get_dataframe
+from agentz.flow import get_current_data_store
+from loguru import logger
 
 
 @function_tool
 async def preprocess_data(
-    file_path: str,
     operations: List[str],
+    file_path: Optional[str] = None,
     target_column: Optional[str] = None,
     output_path: Optional[str] = None
 ) -> Union[Dict[str, Any], str]:
     """Performs data preprocessing operations on a dataset.
 
+    This tool automatically uses the current dataset from the pipeline context.
+    A file_path can optionally be provided to preprocess a different dataset.
+
     Args:
-        file_path: Path to the dataset file
         operations: List of preprocessing operations to perform. Options:
             - "handle_missing": Handle missing values (mean/median/mode imputation)
             - "remove_duplicates": Remove duplicate rows
@@ -27,6 +32,7 @@ async def preprocess_data(
             - "scale_minmax": Min-max scaling for numerical features
             - "remove_outliers": Remove outliers using IQR method
             - "feature_engineering": Create interaction features
+        file_path: Optional path to dataset file. If not provided, uses current dataset.
         target_column: Optional target column to preserve
         output_path: Optional path to save preprocessed dataset
 
@@ -40,20 +46,15 @@ async def preprocess_data(
         Or error message string if preprocessing fails
     """
     try:
-        file_path = Path(file_path)
-
-        if not file_path.exists():
-            return f"File not found: {file_path}"
-
-        # Load dataset
-        if file_path.suffix.lower() == '.csv':
-            df = pd.read_csv(file_path)
-        elif file_path.suffix.lower() in ['.xlsx', '.xls']:
-            df = pd.read_excel(file_path)
-        elif file_path.suffix.lower() == '.json':
-            df = pd.read_json(file_path)
+        # Get DataFrame - either from file_path or current dataset
+        if file_path is None:
+            df = get_current_dataset()
+            if df is None:
+                return "Error: No dataset loaded. Please load a dataset first using the load_dataset tool."
+            logger.info("Preprocessing current dataset from pipeline context")
         else:
-            return f"Unsupported file format: {file_path.suffix}"
+            df = load_or_get_dataframe(file_path, prefer_preprocessed=False)
+            logger.info(f"Preprocessing dataset from: {file_path}")
 
         original_shape = df.shape
         changes_summary = []
@@ -177,6 +178,38 @@ async def preprocess_data(
                 df.to_json(output_path, orient='records')
             else:
                 return f"Unsupported output format: {output_path.suffix}"
+
+        # Update the current dataset with preprocessed version
+        data_store = get_current_data_store()
+        if data_store:
+            # Always update current_dataset with the preprocessed version
+            data_store.set(
+                "current_dataset",
+                df,
+                data_type="dataframe",
+                metadata={
+                    "shape": df.shape,
+                    "operations": operations_applied,
+                    "source": "preprocessed"
+                }
+            )
+            logger.info(f"Updated current dataset with preprocessed version")
+
+            # Also cache with file path key if provided
+            if file_path:
+                file_path_obj = Path(file_path)
+                preprocessed_key = f"preprocessed:{file_path_obj.resolve()}"
+                data_store.set(
+                    preprocessed_key,
+                    df,
+                    data_type="dataframe",
+                    metadata={
+                        "file_path": str(file_path),
+                        "shape": df.shape,
+                        "operations": operations_applied
+                    }
+                )
+                logger.info(f"Cached preprocessed DataFrame with key: {preprocessed_key}")
 
         result = {
             "operations_applied": operations_applied,
