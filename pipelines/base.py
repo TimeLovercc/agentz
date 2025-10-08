@@ -14,6 +14,7 @@ from agentz.flow import (
     AgentExecutor,
     ExecutionContext,
 )
+from agentz.reporting import RunReporter
 from agentz.utils import Printer, get_experiment_timestamp
 from pydantic import BaseModel
 
@@ -51,6 +52,7 @@ class BasePipeline:
         """
         self.console = Console()
         self._printer: Optional[Printer] = None
+        self.reporter: Optional[RunReporter] = None
 
         # Resolve configuration using the new unified API
         self.config = resolve_config(config)
@@ -66,6 +68,12 @@ class BasePipeline:
         self.experiment_id = get_experiment_timestamp()
 
         pipeline_settings = self.config.pipeline
+        default_slug = self.__class__.__name__.replace("Pipeline", "").lower()
+        self.pipeline_slug = (
+            pipeline_settings.get("slug")
+            or pipeline_settings.get("name")
+            or default_slug
+        )
         self.workflow_name = (
             pipeline_settings.get("workflow_name")
             or pipeline_settings.get("name")
@@ -125,12 +133,14 @@ class BasePipeline:
                 enable_tracing=enable_tracing,
                 trace_sensitive=trace_sensitive,
                 iteration=self.iteration,
-                experiment_id=self.experiment_id
+                experiment_id=self.experiment_id,
+                reporter=self.reporter,
             )
         else:
             # Update iteration in existing context
             self._execution_context.iteration = self.iteration
             self._execution_context.printer = self.printer
+            self._execution_context.reporter = self.reporter
         return self._execution_context
 
     @property
@@ -165,6 +175,9 @@ class BasePipeline:
         """Stop the live printer if it's currently active."""
         if self.printer is not None:
             self.stop_printer()
+        if self.reporter is not None:
+            self.reporter.finalize()
+            self.reporter.print_terminal_report()
 
     def _initialize_run(self, additional_logging=None):
         """Initialize a pipeline run with logging, printer, and tracing.
@@ -187,6 +200,17 @@ class BasePipeline:
         # Provider and model logging
         provider = self.provider_name
         logger.info(f"Provider: {provider}, Model: {self.config.llm.model_name}")
+
+        outputs_dir = Path(self.config.pipeline.get("outputs_dir", "outputs"))
+        if self.reporter is None:
+            self.reporter = RunReporter(
+                base_dir=outputs_dir,
+                pipeline_slug=self.pipeline_slug,
+                workflow_name=self.workflow_name,
+                experiment_id=self.experiment_id,
+                console=self.console,
+            )
+        self.reporter.start(self.config)
 
         # Start printer and update workflow
         self._start_printer()
@@ -319,6 +343,50 @@ class BasePipeline:
             group_id=group_id
         )
 
+    def start_group(
+        self,
+        group_id: str,
+        *,
+        title: Optional[str] = None,
+        border_style: Optional[str] = None,
+        iteration: Optional[int] = None,
+    ) -> None:
+        """Start a printer group and notify the reporter."""
+        if self.reporter:
+            self.reporter.record_group_start(
+                group_id=group_id,
+                title=title,
+                border_style=border_style,
+                iteration=iteration,
+            )
+        if self.printer:
+            self.printer.start_group(
+                group_id,
+                title=title,
+                border_style=border_style,
+            )
+
+    def end_group(
+        self,
+        group_id: str,
+        *,
+        is_done: bool = True,
+        title: Optional[str] = None,
+    ) -> None:
+        """Mark a printer group complete and notify the reporter."""
+        if self.reporter:
+            self.reporter.record_group_end(
+                group_id=group_id,
+                is_done=is_done,
+                title=title,
+            )
+        if self.printer:
+            self.printer.end_group(
+                group_id,
+                is_done=is_done,
+                title=title,
+            )
+
     @contextmanager
     def run_context(self, additional_logging: Optional[Callable] = None):
         """Context manager for run lifecycle handling.
@@ -431,3 +499,24 @@ class BasePipeline:
 
     async def run(self):  # pragma: no cover - must be implemented by subclasses
         raise NotImplementedError("Subclasses must implement 'run'")
+
+    def _resolve_reporter_artifacts(self):
+        """Resolve reporter artefact configuration from pipeline settings."""
+        pipeline_settings = self.config.pipeline or {}
+        reporter_cfg = pipeline_settings.get("reporter")
+        artifacts = None
+
+        if isinstance(reporter_cfg, Mapping):
+            if reporter_cfg.get("artifacts") is not None:
+                artifacts = reporter_cfg.get("artifacts")
+            elif reporter_cfg.get("preset") is not None:
+                artifacts = reporter_cfg.get("preset")
+            elif reporter_cfg.get("mode") is not None:
+                artifacts = reporter_cfg.get("mode")
+        elif isinstance(reporter_cfg, (list, tuple, set, str)):
+            artifacts = reporter_cfg
+
+        if artifacts is None:
+            artifacts = pipeline_settings.get("output_artifacts")
+
+        return artifacts

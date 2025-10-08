@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, Optional
 from agents.tracing.create import agent_span, function_span, trace
 from agentz.utils import Printer
 from agentz.memory.pipeline_context import PipelineDataStore
+from agentz.reporting import RunReporter
 
 # Context variable to store the current execution context
 # This allows tools to access the context without explicit parameter passing
@@ -34,7 +35,8 @@ class ExecutionContext:
         enable_tracing: bool = True,
         trace_sensitive: bool = False,
         iteration: int = 0,
-        experiment_id: Optional[str] = None
+        experiment_id: Optional[str] = None,
+        reporter: Optional[RunReporter] = None,
     ):
         """Initialize execution context.
 
@@ -49,6 +51,7 @@ class ExecutionContext:
         self.enable_tracing = enable_tracing
         self.trace_sensitive = trace_sensitive
         self.iteration = iteration
+        self.reporter = reporter
         self.data_store = PipelineDataStore(experiment_id=experiment_id)
 
     def trace_context(self, name: str, metadata: Optional[Dict[str, Any]] = None):
@@ -100,6 +103,15 @@ class ExecutionContext:
             border_style: Optional border color
             group_id: Optional group to nest this item in
         """
+        if self.reporter:
+            self.reporter.record_status_update(
+                item_id=key,
+                content=message,
+                is_done=is_done,
+                title=title,
+                border_style=border_style,
+                group_id=group_id,
+            )
         if self.printer:
             self.printer.update_item(
                 key,
@@ -118,8 +130,17 @@ class ExecutionContext:
         *,
         border_style: Optional[str] = None,
         iteration: Optional[int] = None,
+        group_id: Optional[str] = None,
     ) -> None:
         """Proxy helper for rendering standalone panels via the printer."""
+        if self.reporter:
+            self.reporter.record_panel(
+                title=title,
+                content=content,
+                border_style=border_style,
+                iteration=iteration,
+                group_id=group_id,
+            )
         if self.printer:
             self.printer.log_panel(
                 title,
@@ -189,6 +210,9 @@ def auto_trace(additional_logging: Optional[Callable] = None):
                     # Auto-finalize if result looks like a research report
                     if result and isinstance(result, str) and hasattr(self, '_finalise_research'):
                         await self._finalise_research(result)
+                    reporter = getattr(self, "reporter", None)
+                    if reporter:
+                        reporter.set_final_result(result)
                     return result
             finally:
                 self._stop_printer()
