@@ -1,18 +1,23 @@
 """Data analysis tool for exploratory data analysis and statistical analysis."""
 
-from typing import Union, Dict, Any
+from typing import Union, Dict, Any, Optional
 from pathlib import Path
 import pandas as pd
 import numpy as np
 from agents import function_tool
+from .helpers import get_current_dataset, load_or_get_dataframe
+from loguru import logger
 
 
 @function_tool
-async def analyze_data(file_path: str, target_column: str = None) -> Union[Dict[str, Any], str]:
+async def analyze_data(file_path: Optional[str] = None, target_column: str = None) -> Union[Dict[str, Any], str]:
     """Performs comprehensive exploratory data analysis on a dataset.
 
+    This tool automatically uses the current dataset from the pipeline context.
+    A file_path can optionally be provided to analyze a different dataset.
+
     Args:
-        file_path: Path to the dataset file
+        file_path: Optional path to dataset file. If not provided, uses current dataset.
         target_column: Optional target column for correlation analysis
 
     Returns:
@@ -25,20 +30,15 @@ async def analyze_data(file_path: str, target_column: str = None) -> Union[Dict[
         Or error message string if analysis fails
     """
     try:
-        file_path = Path(file_path)
-
-        if not file_path.exists():
-            return f"File not found: {file_path}"
-
-        # Load dataset
-        if file_path.suffix.lower() == '.csv':
-            df = pd.read_csv(file_path)
-        elif file_path.suffix.lower() in ['.xlsx', '.xls']:
-            df = pd.read_excel(file_path)
-        elif file_path.suffix.lower() == '.json':
-            df = pd.read_json(file_path)
+        # Get DataFrame - either from file_path or current dataset
+        if file_path is None:
+            df = get_current_dataset()
+            if df is None:
+                return "Error: No dataset loaded. Please load a dataset first using the load_dataset tool."
+            logger.info("Analyzing current dataset from pipeline context")
         else:
-            return f"Unsupported file format: {file_path.suffix}"
+            df = load_or_get_dataframe(file_path, prefer_preprocessed=False)
+            logger.info(f"Analyzing dataset from: {file_path}")
 
         result = {}
 

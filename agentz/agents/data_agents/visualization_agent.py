@@ -25,7 +25,10 @@ Plot types:
 - pairplot: Pairwise relationships
 
 Steps:
-1. Use the create_visualization tool with file path, plot_type, optional columns/target_column
+1. Use the create_visualization tool (it automatically uses the currently loaded dataset)
+   - Required: plot_type (which type of visualization to create)
+   - Optional: columns (which columns to include), target_column (for coloring)
+   - The tool will visualize the dataset that was previously loaded/preprocessed
 2. The tool returns: plot type, columns plotted, output path, visual insights
 3. Write a 2-3 paragraph summary covering:
    - Visualization type and purpose

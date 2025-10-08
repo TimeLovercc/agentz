@@ -16,7 +16,10 @@ INSTRUCTIONS = f"""
 You are a model evaluation specialist. Your task is to assess model performance comprehensively.
 
 Steps:
-1. Use the evaluate_model tool with file path, target_column, and model_type
+1. Use the evaluate_model tool (it automatically uses the currently loaded dataset)
+   - Required: target_column (which column was predicted)
+   - Optional: model_type (default: random_forest)
+   - The tool will evaluate on the dataset that was previously loaded/preprocessed
 2. The tool returns:
    - Classification: accuracy, precision, recall, F1, confusion matrix, per-class metrics, CV results
    - Regression: R², RMSE, MAE, MAPE, error analysis, CV results

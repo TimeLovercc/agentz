@@ -124,7 +124,8 @@ class BasePipeline:
                 printer=self.printer,
                 enable_tracing=enable_tracing,
                 trace_sensitive=trace_sensitive,
-                iteration=self.iteration
+                iteration=self.iteration,
+                experiment_id=self.experiment_id
             )
         else:
             # Update iteration in existing context

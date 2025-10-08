@@ -7,7 +7,7 @@ api_key: "${GEMINI_API_KEY}"  # Loads from environment variable
 
 # Dataset defaults
 data:
-  path: "data/banana_quality.csv"
+  path: "/Users/zhimeng/workspaces/agentz/data/banana_quality.csv"
   prompt: |
     Build a model to classify banana quality as good or bad based on their numerical
     information about bananas of different quality (size, weight, sweetness, softness,

@@ -26,7 +26,10 @@ Available operations:
 - feature_engineering: Create interaction features
 
 Steps:
-1. Use the preprocess_data tool with file path, operations list, and optional target_column
+1. Use the preprocess_data tool (it automatically uses the currently loaded dataset)
+   - Required: operations list (which operations to perform)
+   - Optional: target_column (if mentioned in the task)
+   - The tool will preprocess the dataset that was previously loaded
 2. The tool returns: operations applied, shape changes, summary of changes
 3. Write a 2-3 paragraph summary covering:
    - Operations performed and justification

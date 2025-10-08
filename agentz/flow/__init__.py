@@ -21,7 +21,13 @@ Patterns:
 - PipelinePattern: Compose multiple patterns
 """
 
-from agentz.flow.context import ExecutionContext, auto_trace, with_span_step
+from agentz.flow.context import (
+    ExecutionContext,
+    auto_trace,
+    with_span_step,
+    get_current_context,
+    get_current_data_store,
+)
 from agentz.flow.executor import AgentExecutor, AgentStep, PrinterConfig
 from agentz.flow.patterns import (
     ConditionalPattern,
@@ -39,6 +45,9 @@ __all__ = [
     "AgentExecutor",
     "AgentStep",
     "PrinterConfig",
+    # Context access
+    "get_current_context",
+    "get_current_data_store",
     # Decorators
     "auto_trace",
     "with_span_step",
