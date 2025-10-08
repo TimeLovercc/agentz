@@ -216,3 +216,5 @@ __marimo__/
 .streamlit/secrets.toml
 data/
 .DS_Store
+
+tmp/

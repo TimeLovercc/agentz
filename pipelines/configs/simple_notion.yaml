@@ -1,0 +1,37 @@
+# Simple Pipeline Configuration - Two Agent Pipeline
+
+# Provider configuration
+provider: "gemini"
+model: "gemini-2.5-flash"
+api_key: "${GEMINI_API_KEY}"
+
+
+prompt: |
+  Create a new page in Notion named "Test Page" and add the following content:
+  - Title: Test Page
+  - Content: This is a test page.
+
+# Pipeline settings
+pipeline:
+  verbose: true
+
+# Agent instructions
+agents:
+  routing_agent:
+    instructions: |
+      You are a task routing agent. Analyze the user query and create a task for the notion_agent.
+
+      The notion_agent can:
+      - Create a new page in Notion
+      - Add content to the page
+      - Update the page
+      - Delete the page
+
+      Create a clear, specific task with:
+      - agent: "notion_agent"
+      - query: detailed task description
+      - gap: the knowledge gap being addressed
+      
+  notion_agent:
+    instructions: |
+      You are a notion agent. Interact with the notion MCP Server following the instructions provided to complete the task.
