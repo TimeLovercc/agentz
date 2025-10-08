@@ -10,11 +10,15 @@ from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.metrics import accuracy_score, mean_squared_error, r2_score
 from agents import function_tool
-from .helpers import get_current_dataset, load_or_get_dataframe, cache_object
+from agents.run_context import RunContextWrapper
+from agentz.memory.pipeline_context import PipelineDataStore
+from .helpers import load_or_get_dataframe, cache_object
+from loguru import logger
 
 
 @function_tool
 async def train_model(
+    ctx: RunContextWrapper[PipelineDataStore],
     target_column: str,
     file_path: Optional[str] = None,
     model_type: str = "auto",
@@ -27,6 +31,7 @@ async def train_model(
     A file_path can optionally be provided to train on a different dataset.
 
     Args:
+        ctx: Pipeline context wrapper for accessing the data store
         target_column: Name of the target column to predict
         file_path: Optional path to dataset file. If not provided, uses current dataset.
         model_type: Type of model to train. Options:
@@ -51,13 +56,15 @@ async def train_model(
     """
     try:
         # Get DataFrame - either from file_path or current dataset
+        data_store = ctx.context
         if file_path is None:
-            df = get_current_dataset()
-            if df is None:
+            if data_store and data_store.has("current_dataset"):
+                df = data_store.get("current_dataset")
+                logger.info("Training model on current dataset from pipeline context")
+            else:
                 return "Error: No dataset loaded. Please load a dataset first using the load_dataset tool."
-            logger.info("Training model on current dataset from pipeline context")
         else:
-            df = load_or_get_dataframe(file_path, prefer_preprocessed=True)
+            df = load_or_get_dataframe(file_path, prefer_preprocessed=True, data_store=data_store)
             logger.info(f"Training model on dataset from: {file_path}")
 
         if target_column not in df.columns:
@@ -150,12 +157,13 @@ async def train_model(
             })
 
         # Cache the trained model for reuse
-        file_path_obj = Path(file_path)
+        file_path_obj = Path(file_path) if file_path else Path("model")
         model_key = f"model:{file_path_obj.resolve()}"
         cache_object(
             model_key,
             model,
             data_type="model",
+            data_store=data_store,
             metadata={
                 "file_path": str(file_path),
                 "model_type": model_name,

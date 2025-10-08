@@ -12,11 +12,15 @@ from sklearn.metrics import (
     mean_squared_error, mean_absolute_error, r2_score
 )
 from agents import function_tool
-from .helpers import get_current_dataset, load_or_get_dataframe, get_cached_object
+from agents.run_context import RunContextWrapper
+from agentz.memory.pipeline_context import PipelineDataStore
+from .helpers import load_or_get_dataframe
+from loguru import logger
 
 
 @function_tool
 async def evaluate_model(
+    ctx: RunContextWrapper[PipelineDataStore],
     target_column: str,
     file_path: Optional[str] = None,
     model_type: str = "random_forest",
@@ -29,6 +33,7 @@ async def evaluate_model(
     A file_path can optionally be provided to evaluate on a different dataset.
 
     Args:
+        ctx: Pipeline context wrapper for accessing the data store
         target_column: Name of the target column to predict
         file_path: Optional path to dataset file. If not provided, uses current dataset.
         model_type: Type of model to evaluate (random_forest, decision_tree, etc.)
@@ -47,13 +52,15 @@ async def evaluate_model(
     """
     try:
         # Get DataFrame - either from file_path or current dataset
+        data_store = ctx.context
         if file_path is None:
-            df = get_current_dataset()
-            if df is None:
+            if data_store and data_store.has("current_dataset"):
+                df = data_store.get("current_dataset")
+                logger.info("Evaluating model on current dataset from pipeline context")
+            else:
                 return "Error: No dataset loaded. Please load a dataset first using the load_dataset tool."
-            logger.info("Evaluating model on current dataset from pipeline context")
         else:
-            df = load_or_get_dataframe(file_path, prefer_preprocessed=True)
+            df = load_or_get_dataframe(file_path, prefer_preprocessed=True, data_store=data_store)
             logger.info(f"Evaluating model on dataset from: {file_path}")
 
         if target_column not in df.columns:

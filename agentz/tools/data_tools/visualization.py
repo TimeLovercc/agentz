@@ -9,12 +9,15 @@ import seaborn as sns
 import base64
 from io import BytesIO
 from agents import function_tool
-from .helpers import get_current_dataset, load_or_get_dataframe
+from agents.run_context import RunContextWrapper
+from agentz.memory.pipeline_context import PipelineDataStore
+from .helpers import load_or_get_dataframe
 from loguru import logger
 
 
 @function_tool
 async def create_visualization(
+    ctx: RunContextWrapper[PipelineDataStore],
     plot_type: str,
     file_path: Optional[str] = None,
     columns: Optional[List[str]] = None,
@@ -27,6 +30,7 @@ async def create_visualization(
     A file_path can optionally be provided to visualize a different dataset.
 
     Args:
+        ctx: Pipeline context wrapper for accessing the data store
         plot_type: Type of visualization to create. Options:
             - "distribution": Histogram/distribution plots for numerical columns
             - "correlation": Correlation heatmap
@@ -50,13 +54,15 @@ async def create_visualization(
     """
     try:
         # Get DataFrame - either from file_path or current dataset
+        data_store = ctx.context
         if file_path is None:
-            df = get_current_dataset()
-            if df is None:
+            if data_store and data_store.has("current_dataset"):
+                df = data_store.get("current_dataset")
+                logger.info("Creating visualization from current dataset in pipeline context")
+            else:
                 return "Error: No dataset loaded. Please load a dataset first using the load_dataset tool."
-            logger.info("Creating visualization from current dataset in pipeline context")
         else:
-            df = load_or_get_dataframe(file_path, prefer_preprocessed=False)
+            df = load_or_get_dataframe(file_path, prefer_preprocessed=False, data_store=data_store)
             logger.info(f"Creating visualization from dataset: {file_path}")
 
         # Set style
