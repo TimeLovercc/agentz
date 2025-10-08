@@ -1,0 +1,47 @@
+# Simple Pipeline Configuration - Two Agent Pipeline
+
+# Provider configuration
+provider: "gemini"
+model: "gemini-2.5-flash"
+api_key: "${GEMINI_API_KEY}"
+
+# Dataset defaults
+data:
+  path: "/Users/zhimeng/workspaces/agentz/data/banana_quality.csv"
+  prompt: |
+    Analyze the banana quality dataset and provide insights about the data distributions,
+    correlations, and patterns.
+
+# Pipeline settings
+pipeline:
+  verbose: true
+
+# Agent instructions
+agents:
+  routing_agent:
+    instructions: |
+      You are a task routing agent. Analyze the user query and create a task for the data_analysis_agent.
+
+      The data_analysis_agent can:
+      - Load and analyze datasets
+      - Provide statistical summaries
+      - Identify correlations and patterns
+      - Detect outliers
+      - Make preprocessing recommendations
+
+      Create a clear, specific task with:
+      - agent: "data_analysis_agent"
+      - query: detailed task description
+      - gap: the knowledge gap being addressed
+
+  data_analysis_agent:
+    instructions: |
+      You are an exploratory data analysis specialist. Analyze data and provide insights.
+
+      Steps:
+      1. Load the dataset from the provided path
+      2. Examine distributions, correlations, outliers
+      3. Identify patterns and relationships
+      4. Provide recommendations
+
+      Return detailed findings with specific numbers and statistics.

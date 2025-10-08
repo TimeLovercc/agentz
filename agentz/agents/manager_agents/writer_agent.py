@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from agents import Agent
+from agentz.agents.base import ResearchAgent as Agent
 from agentz.configuration.base import BaseConfig, get_agent_spec
 from agentz.agents.registry import register_agent
 
