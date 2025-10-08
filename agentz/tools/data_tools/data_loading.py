@@ -4,18 +4,20 @@ from typing import Union, Dict, Any
 from pathlib import Path
 import pandas as pd
 from agents import function_tool
-from agentz.flow import get_current_data_store
+from agents.run_context import RunContextWrapper
+from agentz.memory.pipeline_context import PipelineDataStore
 from loguru import logger
 
 
 @function_tool
-async def load_dataset(file_path: str) -> Union[Dict[str, Any], str]:
+async def load_dataset(ctx: RunContextWrapper[PipelineDataStore], file_path: str) -> Union[Dict[str, Any], str]:
     """Loads a dataset and provides comprehensive inspection information.
 
     This tool caches the loaded DataFrame in the pipeline data store so other
     tools can reuse it without reloading from disk.
 
     Args:
+        ctx: Pipeline context wrapper for accessing the data store
         file_path: Path to the dataset file (CSV, JSON, Excel, etc.)
 
     Returns:
@@ -48,8 +50,8 @@ async def load_dataset(file_path: str) -> Union[Dict[str, Any], str]:
             return f"Unsupported file format: {file_path.suffix}"
 
         # Store DataFrame in data store for reuse by other tools
-        data_store = get_current_data_store()
-        if data_store:
+        data_store = ctx.context
+        if data_store is not None:
             # Store with file path key for backward compatibility
             cache_key = f"dataframe:{file_path.resolve()}"
             data_store.set(

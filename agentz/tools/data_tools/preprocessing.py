@@ -6,13 +6,15 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder
 from agents import function_tool
-from .helpers import get_current_dataset, load_or_get_dataframe
-from agentz.flow import get_current_data_store
+from agents.run_context import RunContextWrapper
+from agentz.memory.pipeline_context import PipelineDataStore
+from .helpers import load_or_get_dataframe
 from loguru import logger
 
 
 @function_tool
 async def preprocess_data(
+    ctx: RunContextWrapper[PipelineDataStore],
     operations: List[str],
     file_path: Optional[str] = None,
     target_column: Optional[str] = None,
@@ -24,6 +26,7 @@ async def preprocess_data(
     A file_path can optionally be provided to preprocess a different dataset.
 
     Args:
+        ctx: Pipeline context wrapper for accessing the data store
         operations: List of preprocessing operations to perform. Options:
             - "handle_missing": Handle missing values (mean/median/mode imputation)
             - "remove_duplicates": Remove duplicate rows
@@ -47,13 +50,15 @@ async def preprocess_data(
     """
     try:
         # Get DataFrame - either from file_path or current dataset
+        data_store = ctx.context
         if file_path is None:
-            df = get_current_dataset()
-            if df is None:
+            if data_store and data_store.has("current_dataset"):
+                df = data_store.get("current_dataset")
+                logger.info("Preprocessing current dataset from pipeline context")
+            else:
                 return "Error: No dataset loaded. Please load a dataset first using the load_dataset tool."
-            logger.info("Preprocessing current dataset from pipeline context")
         else:
-            df = load_or_get_dataframe(file_path, prefer_preprocessed=False)
+            df = load_or_get_dataframe(file_path, prefer_preprocessed=False, data_store=data_store)
             logger.info(f"Preprocessing dataset from: {file_path}")
 
         original_shape = df.shape
@@ -180,7 +185,6 @@ async def preprocess_data(
                 return f"Unsupported output format: {output_path.suffix}"
 
         # Update the current dataset with preprocessed version
-        data_store = get_current_data_store()
         if data_store:
             # Always update current_dataset with the preprocessed version
             data_store.set(

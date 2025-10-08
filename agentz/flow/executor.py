@@ -156,9 +156,9 @@ class AgentExecutor:
             # Activate context so tools can access it
             with self.context.activate():
                 if sync:
-                    result = Runner.run_sync(agent, instructions)
+                    result = Runner.run_sync(agent, instructions, context=self.context.data_store)
                 else:
-                    result = await Runner.run(agent, instructions)
+                    result = await Runner.run(agent, instructions, context=self.context.data_store)
 
             raw_output = getattr(result, "final_output", result)
 

@@ -5,18 +5,21 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from agents import function_tool
-from .helpers import get_current_dataset, load_or_get_dataframe
+from agents.run_context import RunContextWrapper
+from agentz.memory.pipeline_context import PipelineDataStore
+from .helpers import load_or_get_dataframe
 from loguru import logger
 
 
 @function_tool
-async def analyze_data(file_path: Optional[str] = None, target_column: str = None) -> Union[Dict[str, Any], str]:
+async def analyze_data(ctx: RunContextWrapper[PipelineDataStore], file_path: Optional[str] = None, target_column: str = None) -> Union[Dict[str, Any], str]:
     """Performs comprehensive exploratory data analysis on a dataset.
 
     This tool automatically uses the current dataset from the pipeline context.
     A file_path can optionally be provided to analyze a different dataset.
 
     Args:
+        ctx: Pipeline context wrapper for accessing the data store
         file_path: Optional path to dataset file. If not provided, uses current dataset.
         target_column: Optional target column for correlation analysis
 
@@ -31,13 +34,15 @@ async def analyze_data(file_path: Optional[str] = None, target_column: str = Non
     """
     try:
         # Get DataFrame - either from file_path or current dataset
+        data_store = ctx.context
         if file_path is None:
-            df = get_current_dataset()
-            if df is None:
+            if data_store and data_store.has("current_dataset"):
+                df = data_store.get("current_dataset")
+                logger.info("Analyzing current dataset from pipeline context")
+            else:
                 return "Error: No dataset loaded. Please load a dataset first using the load_dataset tool."
-            logger.info("Analyzing current dataset from pipeline context")
         else:
-            df = load_or_get_dataframe(file_path, prefer_preprocessed=False)
+            df = load_or_get_dataframe(file_path, prefer_preprocessed=False, data_store=data_store)
             logger.info(f"Analyzing dataset from: {file_path}")
 
         result = {}

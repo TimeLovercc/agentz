@@ -9,10 +9,7 @@ api_key: "${GEMINI_API_KEY}"  # Loads from environment variable
 data:
   path: "/Users/zhimeng/workspaces/agentz/data/banana_quality.csv"
   prompt: |
-    Build a model to classify banana quality as good or bad based on their numerical
-    information about bananas of different quality (size, weight, sweetness, softness,
-    harvest time, ripeness, and acidity). We have uploaded the entire dataset for you
-    here in the banana_quality.csv file.
+    Build a model to classify banana quality as good or bad based on their information. We have uploaded the entire dataset for you here in the banana_quality.csv file.
 
 # Pipeline settings
 pipeline:

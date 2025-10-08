@@ -3,22 +3,22 @@
 from typing import Optional
 from pathlib import Path
 import pandas as pd
-from agentz.flow import get_current_data_store
+from agentz.memory.pipeline_context import PipelineDataStore
 from loguru import logger
 
 
-def get_dataframe(file_path: str, prefer_preprocessed: bool = False) -> Optional[pd.DataFrame]:
+def get_dataframe(file_path: str, prefer_preprocessed: bool = False, data_store: Optional[PipelineDataStore] = None) -> Optional[pd.DataFrame]:
     """Get a DataFrame from cache or load from file.
 
     Args:
         file_path: Path to the dataset file
         prefer_preprocessed: If True, try to get preprocessed version first
+        data_store: Pipeline data store instance
 
     Returns:
         DataFrame or None if not found
     """
     file_path = Path(file_path)
-    data_store = get_current_data_store()
 
     if not data_store:
         return None
@@ -39,12 +39,13 @@ def get_dataframe(file_path: str, prefer_preprocessed: bool = False) -> Optional
     return None
 
 
-def load_or_get_dataframe(file_path: str, prefer_preprocessed: bool = False) -> pd.DataFrame:
+def load_or_get_dataframe(file_path: str, prefer_preprocessed: bool = False, data_store: Optional[PipelineDataStore] = None) -> pd.DataFrame:
     """Get DataFrame from cache or load from file, with fallback loading.
 
     Args:
         file_path: Path to the dataset file
         prefer_preprocessed: If True, try to get preprocessed version first
+        data_store: Pipeline data store instance
 
     Returns:
         DataFrame
@@ -54,7 +55,7 @@ def load_or_get_dataframe(file_path: str, prefer_preprocessed: bool = False) -> 
         ValueError: If file format is not supported
     """
     # Try cache first
-    df = get_dataframe(file_path, prefer_preprocessed)
+    df = get_dataframe(file_path, prefer_preprocessed, data_store)
     if df is not None:
         return df
 
@@ -75,7 +76,6 @@ def load_or_get_dataframe(file_path: str, prefer_preprocessed: bool = False) -> 
         raise ValueError(f"Unsupported file format: {file_path.suffix}")
 
     # Cache it for future use
-    data_store = get_current_data_store()
     if data_store:
         cache_key = f"dataframe:{file_path.resolve()}"
         data_store.set(
@@ -89,7 +89,7 @@ def load_or_get_dataframe(file_path: str, prefer_preprocessed: bool = False) -> 
     return df
 
 
-def cache_object(key: str, obj: any, data_type: str = None, metadata: dict = None) -> None:
+def cache_object(key: str, obj: any, data_type: str = None, metadata: dict = None, data_store: Optional[PipelineDataStore] = None) -> None:
     """Cache an object in the pipeline data store.
 
     Args:
@@ -97,58 +97,24 @@ def cache_object(key: str, obj: any, data_type: str = None, metadata: dict = Non
         obj: Object to cache
         data_type: Type descriptor (e.g., 'model', 'scaler')
         metadata: Optional metadata
+        data_store: Pipeline data store instance
     """
-    data_store = get_current_data_store()
     if data_store:
         data_store.set(key, obj, data_type=data_type, metadata=metadata)
         logger.info(f"Cached {data_type or 'object'} with key: {key}")
 
 
-def get_cached_object(key: str) -> Optional[any]:
+def get_cached_object(key: str, data_store: Optional[PipelineDataStore] = None) -> Optional[any]:
     """Get a cached object from the pipeline data store.
 
     Args:
         key: Cache key
+        data_store: Pipeline data store instance
 
     Returns:
         Cached object or None
     """
-    data_store = get_current_data_store()
     if data_store and data_store.has(key):
         logger.info(f"Retrieved cached object with key: {key}")
         return data_store.get(key)
     return None
-
-
-def get_current_dataset() -> Optional[pd.DataFrame]:
-    """Get the current active dataset from the pipeline context.
-
-    This is the main dataset that agents are working with. It's automatically
-    updated when data is loaded or preprocessed.
-
-    Returns:
-        The current DataFrame or None if no dataset is loaded
-    """
-    data_store = get_current_data_store()
-    if data_store and data_store.has("current_dataset"):
-        logger.info("Using current dataset from pipeline context")
-        return data_store.get("current_dataset")
-    return None
-
-
-def set_current_dataset(df: pd.DataFrame, metadata: dict = None) -> None:
-    """Set the current active dataset in the pipeline context.
-
-    Args:
-        df: DataFrame to set as current
-        metadata: Optional metadata about the dataset
-    """
-    data_store = get_current_data_store()
-    if data_store:
-        data_store.set(
-            "current_dataset",
-            df,
-            data_type="dataframe",
-            metadata=metadata or {}
-        )
-        logger.info("Set current dataset in pipeline context")
