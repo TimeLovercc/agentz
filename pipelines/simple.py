@@ -33,7 +33,7 @@ class SimplePipeline(BasePipeline):
         )
 
         # Route the task
-        self.update_printer("route", "Routing task to agent...")
+        # self.update_printer("route", "Routing task to agent...")
         selection_plan = await self.agent_step(
             agent=self.routing_agent,
             instructions=f"""
@@ -49,11 +49,14 @@ class SimplePipeline(BasePipeline):
             printer_key="route",
             printer_title="Routing",
         )
-        self.update_printer("route", "Task routed", is_done=True)
+        # self.update_printer("route", "Task routed", is_done=True)
 
         # Execute the tool agent
         task = selection_plan.tasks[0]
-        self.update_printer("tool", f"Executing {task.agent}...")
+        # self.update_printer("tool", f"Executing {task.agent}...")
+        
+        # import ipdb
+        # ipdb.set_trace()
 
         result = await self.agent_step(
             agent=self.tool_agent,
@@ -63,8 +66,10 @@ class SimplePipeline(BasePipeline):
             printer_key="tool",
             printer_title=f"Tool: {task.agent}",
         )
+        import ipdb
+        ipdb.set_trace()
 
-        self.update_printer("tool", f"Completed {task.agent}", is_done=True)
+        # self.update_printer("tool", f"Completed {task.agent}", is_done=True)
 
         logger.info("Simple pipeline completed")
         return result

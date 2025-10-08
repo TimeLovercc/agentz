@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional, Union
 
-from agents import Runner
+from agentz.agents.base import ResearchRunner as Runner
 from agents.tracing.create import agent_span, function_span
 from pydantic import BaseModel
 

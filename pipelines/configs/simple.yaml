@@ -7,7 +7,7 @@ api_key: "${GEMINI_API_KEY}"
 
 # Dataset defaults
 data:
-  path: "data/banana_quality.csv"
+  path: "/Users/zhimeng/workspaces/agentz/data/banana_quality.csv"
   prompt: |
     Analyze the banana quality dataset and provide insights about the data distributions,
     correlations, and patterns.
