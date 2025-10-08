@@ -39,15 +39,16 @@ class SimpleNotionPipeline(BasePipeline):
         """Run the simple pipeline with single-pass execution to validate the notion agent."""
         logger.info(f"User prompt: {self.config.prompt}")
 
+
         self.tool_agent = Agent(
             name="Notion",
             instructions=f"""
                 You are a notion agent. Your task is to interact with the notion following the instructions provided.
                 """,
             mcp_servers=[await get_notion_server()],
-            model=self.config.model,
-            output_type=ToolAgentOutput if model_supports_json_and_tool_calls(self.config.model) else None,
-            output_parser=create_type_parser(ToolAgentOutput) if not model_supports_json_and_tool_calls(self.config.model) else None
+            model=self.config.llm.main_model,
+            output_type=ToolAgentOutput if model_supports_json_and_tool_calls(self.config.llm.main_model) else None,
+            output_parser=create_type_parser(ToolAgentOutput) if not model_supports_json_and_tool_calls(self.config.llm.main_model) else None
         )
 
         
