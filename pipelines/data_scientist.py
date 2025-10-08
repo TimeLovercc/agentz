@@ -60,12 +60,12 @@ class DataScientistPipeline(BasePipeline):
             self.conversation.add_iteration()
 
             # Start iteration group
-            if self.printer:
-                self.printer.start_group(
-                    f"iter-{self.iteration}",
-                    title=f"Iteration {self.iteration}",
-                    border_style="white"
-                )
+            self.start_group(
+                f"iter-{self.iteration}",
+                title=f"Iteration {self.iteration}",
+                border_style="white",
+                iteration=self.iteration,
+            )
 
             await self._generate_observations(query=query)
             evaluation = await self._evaluate_research_state(query=query)
@@ -77,27 +77,23 @@ class DataScientistPipeline(BasePipeline):
                 await self._execute_tools(selection_plan.tasks)
 
                 # End iteration group
-                if self.printer:
-                    self.printer.end_group(f"iter-{self.iteration}", is_done=True)
+                self.end_group(f"iter-{self.iteration}", is_done=True)
             else:
                 logger.info(f"Research marked complete by evaluation agent at iteration {self.iteration}")
                 # End iteration group before exiting
-                if self.printer:
-                    self.printer.end_group(f"iter-{self.iteration}", is_done=True)
+                self.end_group(f"iter-{self.iteration}", is_done=True)
                 self.should_continue = False
 
         # Create final report in its own group
-        if self.printer:
-            self.printer.start_group(
-                "iter-final",
-                title="Final Report",
-                border_style="white"
-            )
+        self.start_group(
+            "iter-final",
+            title="Final Report",
+            border_style="white",
+        )
 
         research_report = await self._create_final_report()
 
-        if self.printer:
-            self.printer.end_group("iter-final", is_done=True)
+        self.end_group("iter-final", is_done=True)
 
         self.update_printer("research", "Research workflow complete", is_done=True)
         logger.info("Research workflow completed")
