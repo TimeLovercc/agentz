@@ -1,4 +1,4 @@
-        agentz/memory/pipeline_context.py"""Data visualization tool for creating charts and plots."""
+"""Data visualization tool for creating charts and plots."""
 
 from typing import Union, Dict, Any, Optional, List
 from pathlib import Path
