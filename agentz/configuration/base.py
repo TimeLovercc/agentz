@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field
 
 from agentz.utils import load_config
+from agentz.memory.behavior_profiles import behavior_profiles
 
 
 class BaseConfig(BaseModel):
@@ -247,11 +248,15 @@ def normalize_agents(agents_config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
                 index[key] = {"instructions": value, "params": {}}
             elif isinstance(value, dict):
                 # Check if it has instructions (leaf spec)
-                if "instructions" in value:
-                    index[key] = {
-                        "instructions": value["instructions"],
+                if "instructions" in value or "profile" in value or "params" in value:
+                    entry: Dict[str, Any] = {
                         "params": value.get("params", {})
                     }
+                    if "instructions" in value:
+                        entry["instructions"] = value["instructions"]
+                    if "profile" in value:
+                        entry["profile"] = value["profile"]
+                    index[key] = entry
                 elif _is_agent_instance(value):
                     # Runtime Agent instance - skip (handled elsewhere)
                     pass
@@ -277,24 +282,55 @@ def get_agent_spec(cfg: BaseConfig, name: str, required: bool = True) -> Optiona
     Raises:
         ValueError: If agent not found or missing instructions and required=True
     """
-    idx = getattr(cfg, "agents_index", None)
-    if not idx or name not in idx:
+    idx = getattr(cfg, "agents_index", None) or {}
+
+    spec = dict(idx.get(name, {}))
+    instructions = spec.get("instructions")
+    params_override = dict(spec.get("params", {}))
+
+    profile_name = spec.get("profile")
+    profile_used: Optional[str] = None
+
+    candidate_profiles = []
+    if profile_name:
+        candidate_profiles.append(profile_name)
+    candidate_profiles.append(name)
+
+    if instructions is None:
+        for candidate in candidate_profiles:
+            profile = behavior_profiles.get_optional(candidate)
+            if profile:
+                instructions = profile.instructions
+                params_override = profile.params_with(params_override)
+                profile_used = profile.name
+                break
+    else:
+        for candidate in candidate_profiles:
+            profile = behavior_profiles.get_optional(candidate)
+            if profile:
+                params_override = profile.params_with(params_override)
+                profile_used = profile.name
+                break
+
+    if instructions is None:
         if required:
-            available = list(idx.keys()) if idx else []
+            available = sorted(idx.keys())
             raise ValueError(
-                f"Agent '{name}' not found in config.agents. "
-                f"Available agents: {available}. "
-                f"Please add agent definition to your config YAML file."
+                f"Agent '{name}' has no instructions in config and no behavior profile found. "
+                f"Configured agents: {available}."
             )
         return None
 
-    spec = idx[name]
-    if not spec.get("instructions"):
-        if required:
-            raise ValueError(f"Missing instructions for agent '{name}' in config.agents")
-        return None
+    result: Dict[str, Any] = {
+        "instructions": instructions,
+        "params": params_override,
+    }
+    if profile_used:
+        result["profile"] = profile_used
+    elif profile_name:
+        result["profile"] = profile_name
 
-    return spec
+    return result
 
 
 def _expand_env_vars(obj: Any) -> Any:

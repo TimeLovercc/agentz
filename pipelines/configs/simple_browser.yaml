@@ -15,26 +15,10 @@ prompt: |
 pipeline:
   verbose: true
 
-# Agent instructions
+# Agent profiles
 agents:
   routing_agent:
-    instructions: |
-      You are a task routing agent. Analyze the user query and create a task for the browser_agent.
-
-      The browser_agent can:
-      - Open a website
-      - Search the web
-      - Click on links
-      - Read the content of the page
-      - Click on buttons
-      - Fill out forms
-      - Submit forms
-
-      Create a clear, specific task with:
-      - agent: "browser_agent"
-      - query: detailed task description
-      - gap: the knowledge gap being addressed
+    profile: routing_agent_simple_browser
       
   browser_agent:
-    instructions: |
-      You are a browser agent. Interact with the browser MCP Server following the instructions provided to complete the task.
+    profile: browser_agent

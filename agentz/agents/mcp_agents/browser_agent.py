@@ -15,11 +15,7 @@ from agentz.utils import create_type_parser
 from agents.mcp import MCPServer, MCPServerStdio, MCPServerSse
 from agents import HostedMCPTool
 import asyncio
-
-
-INSTRUCTIONS = f"""
-You are a browser agent. Your task is to interact with the browser following the instructions provided.
-"""
+from agentz.memory.behavior_profiles import behavior_profiles
 
 async def get_browser_server():
     async with MCPServerStdio(
@@ -43,13 +39,23 @@ def create_browser_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
         Agent instance configured for browser tasks
     """
     selected_model = cfg.llm.main_model
+    spec = spec or {}
     server = get_browser_server()
+
+    profile_name = spec.get("profile") or "browser_agent"
+    profile = behavior_profiles.get_optional(profile_name) or behavior_profiles.get("browser_agent")
+
+    instructions = spec.get("instructions", profile.render())
+    agent_kwargs = profile.params_with(spec.get("params"))
+    for reserved in ("name", "instructions", "tools", "model", "output_type", "output_parser", "mcp_servers"):
+        agent_kwargs.pop(reserved, None)
 
     return Agent(
         name="Browser",
-        instructions=INSTRUCTIONS,
+        instructions=instructions,
         mcp_servers=[server],
         model=selected_model,
         output_type=ToolAgentOutput if model_supports_json_and_tool_calls(selected_model) else None,
-        output_parser=create_type_parser(ToolAgentOutput) if not model_supports_json_and_tool_calls(selected_model) else None
+        output_parser=create_type_parser(ToolAgentOutput) if not model_supports_json_and_tool_calls(selected_model) else None,
+        **agent_kwargs,
     )

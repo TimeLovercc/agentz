@@ -4,6 +4,7 @@ from loguru import logger
 
 from agentz.agents.registry import create_agents
 from agentz.flow import auto_trace
+from agentz.memory.behavior_profiles import runtime_prompts
 from pipelines.base import BasePipeline
 from agentz.agents.registry import register_agent, ToolAgentOutput
 from agentz.configuration.base import BaseConfig
@@ -62,13 +63,12 @@ class SimpleNotionPipeline(BasePipeline):
         # self.update_printer("route", "Routing task to agent...")
         selection_plan = await self.agent_step(
             agent=self.routing_agent,
-            instructions=f"""
-            QUERY: {query}
-
-            Available agent: notion_agent
-
-            Create a routing plan with a task for the notion_agent.
-            """,
+            instructions=runtime_prompts.render(
+                "routing_agent",
+                "single_agent_routing",
+                QUERY=query,
+                AVAILABLE_AGENT="notion_agent",
+            ),
             span_name="route_task",
             span_type="agent",
             output_model=self.routing_agent.output_type,

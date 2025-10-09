@@ -10,25 +10,7 @@ from agentz.agents.registry import register_agent, ToolAgentOutput
 from agentz.configuration.base import BaseConfig
 from agentz.llm.llm_setup import model_supports_json_and_tool_calls
 from agentz.utils import create_type_parser
-
-
-INSTRUCTIONS = f"""
-You are a data loading specialist. Your task is to load and inspect datasets.
-
-Steps:
-1. Use the load_dataset tool with the provided file path
-2. The tool returns: shape, columns, dtypes, missing values, sample data, statistics, memory usage, duplicates
-3. Write a 2-3 paragraph summary covering:
-   - Dataset size and structure
-   - Data types and columns
-   - Data quality issues (missing values, duplicates)
-   - Key statistics and initial observations
-
-Include specific numbers and percentages in your summary.
-
-Output JSON only following this schema:
-{ToolAgentOutput.model_json_schema()}
-"""
+from agentz.memory.behavior_profiles import behavior_profiles
 
 
 @register_agent("data_loader_agent", aliases=["data_loader"])
@@ -43,12 +25,25 @@ def create_data_loader_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Ag
         Agent instance configured for data loading tasks
     """
     selected_model = cfg.llm.main_model
+    spec = spec or {}
+
+    profile_name = spec.get("profile") or "data_loader_agent"
+    profile = behavior_profiles.get_optional(profile_name) or behavior_profiles.get("data_loader_agent")
+
+    instructions = spec.get(
+        "instructions",
+        profile.render({"OUTPUT_SCHEMA": ToolAgentOutput.model_json_schema()}),
+    )
+    agent_kwargs = profile.params_with(spec.get("params"))
+    for reserved in ("name", "instructions", "tools", "model", "output_type", "output_parser"):
+        agent_kwargs.pop(reserved, None)
 
     return Agent(
         name="Data Loader",
-        instructions=INSTRUCTIONS,
+        instructions=instructions,
         tools=[load_dataset],
         model=selected_model,
         output_type=ToolAgentOutput if model_supports_json_and_tool_calls(selected_model) else None,
-        output_parser=create_type_parser(ToolAgentOutput) if not model_supports_json_and_tool_calls(selected_model) else None
+        output_parser=create_type_parser(ToolAgentOutput) if not model_supports_json_and_tool_calls(selected_model) else None,
+        **agent_kwargs,
     )
