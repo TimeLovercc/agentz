@@ -13,7 +13,7 @@ data:
 
 # Pipeline settings
 pipeline:
-  max_iterations: 1
+  max_iterations: 3
   max_time_minutes: 3
   verbose: true
   reporter:
