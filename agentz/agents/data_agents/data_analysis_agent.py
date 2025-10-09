@@ -27,8 +27,8 @@ def create_data_analysis_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> 
     selected_model = cfg.llm.main_model
     spec = spec or {}
 
-    profile_name = spec.get("profile") or "data_analysis_agent"
-    profile = behavior_profiles.get_optional(profile_name) or behavior_profiles.get("data_analysis_agent")
+    profile_name = spec.get("profile") or "data_analysis"
+    profile = behavior_profiles.get_optional(profile_name) or behavior_profiles.get("data_analysis")
 
     instructions = spec.get(
         "instructions",

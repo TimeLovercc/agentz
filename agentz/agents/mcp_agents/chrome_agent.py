@@ -38,8 +38,8 @@ def create_chrome_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
     )
     server.connect()
 
-    profile_name = spec.get("profile") or "chrome_agent"
-    profile = behavior_profiles.get_optional(profile_name) or behavior_profiles.get("chrome_agent")
+    profile_name = spec.get("profile") or "chrome"
+    profile = behavior_profiles.get_optional(profile_name) or behavior_profiles.get("chrome")
 
     instructions = spec.get("instructions", profile.render())
     agent_kwargs = profile.params_with(spec.get("params"))

@@ -1,51 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Mapping, MutableMapping, Optional, Protocol, Union
+from typing import Any, Dict, Mapping, Optional, Protocol, Union
 
 from pydantic import BaseModel
 
-from agentz.context.behavior_profiles import runtime_prompts
+from agentz.context.behavior_profiles import behavior_registry
 from agentz.context.conversation import ConversationState, IterationRecord, ToolExecutionResult
 
 Payload = Dict[str, Any]
-
-
-@dataclass(frozen=True)
-class BehaviorTemplate:
-    """Unified representation of a behavior profile and runtime template."""
-
-    key: str
-    profile: str
-    template: str
-    instructions: Optional[str] = None
-    params: Dict[str, Any] = field(default_factory=dict)
-
-
-class BehaviorProfiles:
-    """Collection of behavior templates to bootstrap the context engine."""
-
-    def __init__(self, *behaviors: BehaviorTemplate):
-        self._behaviors: Dict[str, BehaviorTemplate] = {}
-        for behavior in behaviors:
-            self.add(behavior)
-
-    def add(self, behavior: BehaviorTemplate) -> None:
-        if behavior.key in self._behaviors:
-            raise ValueError(f"Behavior '{behavior.key}' already registered in BehaviorProfiles.")
-        self._behaviors[behavior.key] = behavior
-
-    def __iter__(self):
-        return iter(self._behaviors.values())
-
-    def items(self):
-        return self._behaviors.items()
-
-    def get(self, key: str) -> BehaviorTemplate:
-        return self._behaviors[key]
-
-    def values(self):
-        return self._behaviors.values()
 
 
 class SnapshotBuilder(Protocol):
@@ -62,72 +25,15 @@ class OutputHandler(Protocol):
         ...
 
 
-def _render_template(template: str, placeholders: Mapping[str, Any]) -> str:
-    """Render a template string using [[PLACEHOLDER]] substitutions."""
-    text = template
-    for key, value in placeholders.items():
-        token = f"[[{key}]]"
-        text = text.replace(token, str(value))
-    return text
-
-
 def _coerce_payload(data: Union[BaseModel, Mapping[str, Any], None]) -> Payload:
     """Normalise various payload inputs into a mutable dict."""
     if data is None:
         return {}
     if isinstance(data, BaseModel):
         return data.model_dump()
-    if isinstance(data, MutableMapping):
-        return dict(data)
     if isinstance(data, Mapping):
         return dict(data)
     raise TypeError(f"Unsupported payload type: {type(data)!r}")
-
-
-class TemplateLibrary:
-    """Manages prompt templates with optional runtime overrides."""
-
-    def __init__(self):
-        self._overrides: Dict[str, Dict[str, Callable[[Payload], str]]] = {}
-
-    def register_template(self, profile: str, template_name: str, template: str) -> None:
-        """Register or override a template string for a profile."""
-
-        def renderer(payload: Payload) -> str:
-            return _render_template(template, payload)
-
-        self.register_renderer(profile, template_name, renderer)
-
-    def register_renderer(
-        self,
-        profile: str,
-        template_name: str,
-        renderer: Callable[[Payload], str],
-    ) -> None:
-        """Register a custom renderer callable for a template."""
-        self._overrides.setdefault(profile, {})[template_name] = renderer
-
-    def render(self, profile: str, template_name: str, payload: Union[BaseModel, Mapping[str, Any], None] = None) -> str:
-        """Render the template using overrides or the runtime prompt store."""
-        data = _coerce_payload(payload)
-
-        renderer = self._overrides.get(profile, {}).get(template_name)
-        if renderer:
-            return renderer(data)
-
-        return runtime_prompts.render(profile, template_name, **data)
-
-    def has_override(self, profile: str, template_name: str) -> bool:
-        return template_name in self._overrides.get(profile, {})
-
-    def list_templates(self, profile: Optional[str] = None) -> Dict[str, Dict[str, Callable[[Payload], str]]]:
-        """List registered overrides."""
-        if profile:
-            return {profile: dict(self._overrides.get(profile, {}))}
-        return {profile: dict(templates) for profile, templates in self._overrides.items()}
-
-
-StateHook = Callable[[ConversationState], None]
 
 
 @dataclass
@@ -151,113 +57,71 @@ class ContextRegistry:
 
 
 class ContextEngine:
-    """Central coordinator for conversation state and prompt templates."""
+    """Central coordinator for conversation state and agent I/O."""
 
     def __init__(
         self,
         state: ConversationState,
-        *,
-        templates: Optional[TemplateLibrary] = None,
-        behavior_profiles: Optional[BehaviorProfiles] = None,
+        behaviors: Optional[list[str]] = None
     ) -> None:
+        """Initialize context engine with state and optional behaviors.
+
+        Args:
+            state: The conversation state to manage
+            behaviors: Optional list of behavior names to auto-register.
+                      If provided, will register input builders and output handlers
+                      from behavior definitions.
+        """
         self._state = state
-        self.templates = templates or TemplateLibrary()
         self.registry = ContextRegistry()
-        self._state_hooks: Dict[str, StateHook] = {}
-        self._behaviors: Dict[str, BehaviorTemplate] = {}
-        self._agents: Dict[str, Any] = {}
-        if behavior_profiles:
-            for behavior in behavior_profiles:
-                self.register_behavior(behavior)
+
+        # Auto-register behaviors if provided
+        if behaviors:
+            for behavior_key in behaviors:
+                behavior = behavior_registry.get(behavior_key)
+                if behavior.input_builder:
+                    self.registry.register_snapshot(behavior_key, behavior.input_builder)
+                if behavior.output_handler:
+                    self.registry.register_output(behavior_key, behavior.output_handler)
 
     @property
     def state(self) -> ConversationState:
         return self._state
 
     # ------------------------------------------------------------------
-    # Template helpers
+    # Behavior rendering
     # ------------------------------------------------------------------
-    def render_prompt(self, profile: str, template_name: str, payload: Union[BaseModel, Mapping[str, Any], None] = None) -> str:
-        """Render a prompt template using the supplied payload."""
-        return self.templates.render(profile, template_name, payload)
-
-    def build_prompt(
-        self,
-        agent_key: str,
-        profile: str,
-        template_name: str,
-        *,
-        overrides: Optional[Mapping[str, Any]] = None,
-        payload: Optional[Union[BaseModel, Mapping[str, Any]]] = None,
-    ) -> str:
-        """Build a prompt by merging snapshot payloads with optional overrides."""
-        snapshot_payload = self.snapshot(agent_key) if payload is None else _coerce_payload(payload)
-        if overrides:
-            snapshot_payload.update(dict(overrides))
-        return self.render_prompt(profile, template_name, snapshot_payload)
-
-    def register_template(
-        self,
-        profile: str,
-        template_name: str,
-        template: Union[str, Callable[[Payload], str]],
-    ) -> None:
-        """Register a template override for a profile."""
-        if callable(template):
-            self.templates.register_renderer(profile, template_name, template)
-        else:
-            self.templates.register_template(profile, template_name, template)
-
-    # ------------------------------------------------------------------
-    # Behavior and agent registry
-    # ------------------------------------------------------------------
-    def register_behavior(self, behavior: BehaviorTemplate) -> None:
-        self._behaviors[behavior.key] = behavior
-
-    def get_behavior(self, key: str) -> BehaviorTemplate:
-        try:
-            return self._behaviors[key]
-        except KeyError as exc:
-            raise KeyError(f"Behavior '{key}' is not registered.") from exc
-
-    def list_behaviors(self) -> Dict[str, BehaviorTemplate]:
-        return dict(self._behaviors)
-
     def render_behavior(self, key: str, payload: Union[BaseModel, Mapping[str, Any], None] = None) -> str:
-        behavior = self.get_behavior(key)
-        return self.render_prompt(behavior.profile, behavior.template, payload)
+        """Render a behavior template using the supplied payload."""
+        behavior = behavior_registry.get(key)
+        data = _coerce_payload(payload)
+        return behavior.render_template(data)
 
-    def behavior_instructions(self, key: str) -> Optional[str]:
-        return self.get_behavior(key).instructions
-
-    def register_agent(self, key: str, agent: Any) -> None:
-        self._agents[key] = agent
-
-    def get_agent(self, key: str) -> Any:
-        try:
-            return self._agents[key]
-        except KeyError as exc:
-            raise KeyError(f"Agent '{key}' is not registered.") from exc
-
-    def list_agents(self) -> Dict[str, Any]:
-        return dict(self._agents)
+    def behavior_instructions(self, key: str) -> str:
+        """Get the base instructions for a behavior."""
+        behavior = behavior_registry.get(key)
+        return behavior.instructions
 
     # ------------------------------------------------------------------
     # Snapshot + output registration
     # ------------------------------------------------------------------
     def register_snapshot(self, agent_key: str, builder: SnapshotBuilder) -> None:
+        """Register a snapshot builder for an agent."""
         self.registry.register_snapshot(agent_key, builder)
 
     def register_output_handler(self, agent_key: str, handler: OutputHandler) -> None:
+        """Register an output handler for an agent."""
         self.registry.register_output(agent_key, handler)
 
     def snapshot(self, agent_key: str) -> Payload:
+        """Build a snapshot payload for an agent using its registered builder."""
         builder = self.registry.get_snapshot(agent_key)
         if builder is None:
             return {}
         return _coerce_payload(builder(self._state))
 
     def apply_output(self, agent_key: str, output: Any) -> None:
+        """Apply an agent's output to state using its registered handler."""
         handler = self.registry.get_output(agent_key)
         if handler:
             handler(self._state, output)
@@ -266,40 +130,29 @@ class ContextEngine:
     # Conversation state helpers
     # ------------------------------------------------------------------
     def begin_iteration(self) -> IterationRecord:
-        iteration = self._state.begin_iteration()
-        self._notify_hooks("after_iteration_start")
-        return iteration
+        """Start a new iteration and return its record."""
+        return self._state.begin_iteration()
 
     def mark_iteration_complete(self) -> None:
+        """Mark the current iteration as complete."""
         self._state.mark_iteration_complete()
-        self._notify_hooks("after_iteration_complete")
 
     def mark_research_complete(self) -> None:
+        """Mark the entire research process as complete."""
         self._state.mark_research_complete()
-        self._notify_hooks("after_research_complete")
 
     def record_tool_execution(self, result: ToolExecutionResult) -> None:
         """Append a tool execution result to the current iteration."""
         self._state.current_iteration.tools.append(result)
-        self._notify_hooks("after_tool_execution")
 
     def add_finding(self, finding: str) -> None:
+        """Add a finding to the current iteration."""
         self._state.current_iteration.findings.append(finding)
-        self._notify_hooks("after_finding_recorded")
 
     def set_summary(self, summary: str) -> None:
+        """Update the conversation summary."""
         self._state.update_summary(summary)
-        self._notify_hooks("after_summary_updated")
 
     def set_final_report(self, report: str) -> None:
+        """Set the final research report."""
         self._state.final_report = report
-        self._notify_hooks("after_final_report")
-
-    def register_hook(self, name: str, callback: StateHook) -> None:
-        """Register a lifecycle hook executed after specific state transitions."""
-        self._state_hooks[name] = callback
-
-    def _notify_hooks(self, name: str) -> None:
-        hook = self._state_hooks.get(name)
-        if hook:
-            hook(self._state)

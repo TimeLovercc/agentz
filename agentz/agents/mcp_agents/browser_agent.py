@@ -42,8 +42,8 @@ def create_browser_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
     spec = spec or {}
     server = get_browser_server()
 
-    profile_name = spec.get("profile") or "browser_agent"
-    profile = behavior_profiles.get_optional(profile_name) or behavior_profiles.get("browser_agent")
+    profile_name = spec.get("profile") or "browser"
+    profile = behavior_profiles.get_optional(profile_name) or behavior_profiles.get("browser")
 
     instructions = spec.get("instructions", profile.render())
     agent_kwargs = profile.params_with(spec.get("params"))

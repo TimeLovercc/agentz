@@ -11,7 +11,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from textwrap import dedent
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional
+
+from pydantic import BaseModel
 
 
 def _render_template(template: str, placeholders: Optional[Mapping[str, Any]] = None) -> str:
@@ -25,103 +27,88 @@ def _render_template(template: str, placeholders: Optional[Mapping[str, Any]] = 
 
 
 @dataclass(frozen=True)
-class BehaviorProfile:
-    """Immutable container for an agent's core behavior instructions."""
+class Behavior:
+    """
+    Unified behavior definition that encapsulates everything about an agent behavior.
 
-    name: str
-    instructions: str
-    params: Mapping[str, Any] = field(default_factory=dict)
+    This combines:
+    - Instructions (what the agent should do)
+    - Runtime template (how to format the prompt)
+    - Input specification (how to build the snapshot from state)
+    - Output handling (how to apply results back to state)
+    - Tool requirements (what tools this behavior needs)
+    """
+    key: str                                           # Unique identifier, e.g., "observe"
+    instructions: str                                  # Base behavior instructions
+    runtime_template: str                              # Template with [[PLACEHOLDERS]]
+    input_builder: Optional[Callable] = None           # Function: state → Dict[str, Any]
+    output_handler: Optional[Callable] = None          # Function: (state, output) → None
+    output_model: Optional[type[BaseModel]] = None     # Pydantic model for structured output
+    tools: List[str] = field(default_factory=list)     # Required tool names
+    params: Dict[str, Any] = field(default_factory=dict)  # Additional parameters
 
-    def render(self, placeholders: Optional[Mapping[str, Any]] = None) -> str:
-        """Return the instruction text with optional placeholder substitution."""
-        return _render_template(self.instructions, placeholders)
+    def render_template(self, placeholders: Optional[Mapping[str, Any]] = None) -> str:
+        """Render the runtime template with the given placeholders."""
+        return _render_template(self.runtime_template, placeholders)
 
-    def params_with(self, overrides: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
-        """Merge default profile params with optional overrides."""
-        merged = dict(self.params)
-        if overrides:
-            merged.update(overrides)
-        return merged
+    def build_input(self, state: Any) -> Dict[str, Any]:
+        """Build input payload from state using the registered input builder."""
+        if self.input_builder is None:
+            return {}
+        return self.input_builder(state)
+
+    def apply_output(self, state: Any, output: Any) -> None:
+        """Apply output to state using the registered output handler."""
+        if self.output_handler is not None:
+            self.output_handler(state, output)
 
 
-class BehaviorProfileStore:
-    """Registry of named behavior profiles."""
+class BehaviorRegistry:
+    """Registry of complete behavior definitions."""
 
-    def __init__(self, profiles: Mapping[str, BehaviorProfile]):
-        self._profiles = dict(profiles)
+    def __init__(self, behaviors: Optional[Mapping[str, Behavior]] = None):
+        self._behaviors: Dict[str, Behavior] = dict(behaviors) if behaviors else {}
 
-    def __contains__(self, name: str) -> bool:
-        return name in self._profiles
+    def register(self, behavior: Behavior) -> None:
+        """Register a new behavior."""
+        if behavior.key in self._behaviors:
+            raise ValueError(f"Behavior '{behavior.key}' is already registered")
+        self._behaviors[behavior.key] = behavior
 
-    def get(self, name: str) -> BehaviorProfile:
+    def get(self, key: str) -> Behavior:
+        """Get a behavior by key."""
         try:
-            return self._profiles[name]
+            return self._behaviors[key]
         except KeyError as exc:
-            raise KeyError(f"Behavior profile '{name}' not found") from exc
+            raise KeyError(f"Behavior '{key}' not found") from exc
 
-    def get_optional(self, name: str) -> Optional[BehaviorProfile]:
-        return self._profiles.get(name)
+    def get_optional(self, key: str) -> Optional[Behavior]:
+        """Get a behavior by key, returning None if not found."""
+        return self._behaviors.get(key)
 
-    def instructions(self, name: str, *, placeholders: Optional[Mapping[str, Any]] = None) -> str:
-        profile = self.get(name)
-        return profile.render(placeholders)
+    def get_bundle(self, *keys: str) -> List[Behavior]:
+        """Get multiple behaviors as a list."""
+        return [self.get(key) for key in keys]
 
-    def params(self, name: str) -> Dict[str, Any]:
-        profile = self.get(name)
-        return profile.params_with()
+    def __contains__(self, key: str) -> bool:
+        return key in self._behaviors
 
-    def available_profiles(self) -> Dict[str, BehaviorProfile]:
-        return dict(self._profiles)
-
-
-@dataclass(frozen=True)
-class PromptTemplate:
-    """Reusable runtime prompt template keyed by behavior profile."""
-
-    name: str
-    template: str
-
-    def render(self, placeholders: Optional[Mapping[str, Any]] = None) -> str:
-        return _render_template(self.template, placeholders)
+    def available_behaviors(self) -> Dict[str, Behavior]:
+        """Return all available behaviors."""
+        return dict(self._behaviors)
 
 
-class RuntimePromptStore:
-    """Provides runtime prompt templates grouped by agent behavior."""
+# ------------------------------------------------------------------
+# Behavior Definitions
+# Each Behavior combines instructions + runtime template + I/O logic
+# ------------------------------------------------------------------
 
-    def __init__(self, prompts: Mapping[str, Mapping[str, PromptTemplate]]):
-        self._prompts: Dict[str, Dict[str, PromptTemplate]] = {
-            profile: dict(templates)
-            for profile, templates in prompts.items()
-        }
-
-    def get(self, profile: str, template_name: str) -> PromptTemplate:
-        try:
-            templates = self._prompts[profile]
-        except KeyError as exc:
-            raise KeyError(f"Runtime prompt profile '{profile}' not found") from exc
-        try:
-            return templates[template_name]
-        except KeyError as exc:
-            available = ", ".join(sorted(templates))
-            raise KeyError(
-                f"Runtime prompt '{template_name}' not defined for profile '{profile}'. "
-                f"Available templates: {available}"
-            ) from exc
-
-    def render(self, profile: str, template_name: str, **placeholders: Any) -> str:
-        template = self.get(profile, template_name)
-        return template.render(placeholders)
-
-    def available_profiles(self) -> Dict[str, Dict[str, PromptTemplate]]:
-        return {profile: dict(templates) for profile, templates in self._prompts.items()}
-
-
-_PROFILES: Dict[str, BehaviorProfile] = {
+_BEHAVIORS: Dict[str, Behavior] = {
     # ------------------------------------------------------------------
     # Manager agents for iterative research workflows
     # ------------------------------------------------------------------
-    "routing_agent": BehaviorProfile(
-        name="routing_agent",
+    "routing": Behavior(
+        key="routing",
         instructions=dedent(
             """
             You are a task routing agent. Your role is to analyze knowledge gaps and route appropriate tasks to specialized agents.
@@ -147,9 +134,22 @@ _PROFILES: Dict[str, BehaviorProfile] = {
             Create a routing plan with appropriate agents and tasks to address the knowledge gap.
             """
         ).strip(),
+        runtime_template=dedent(
+            """
+            ORIGINAL QUERY:
+            [[QUERY]]
+
+            KNOWLEDGE GAP TO ADDRESS:
+            [[GAP]]
+
+
+            HISTORY OF ACTIONS, FINDINGS AND THOUGHTS:
+            [[HISTORY]]
+            """
+        ).strip(),
     ),
-    "observe_agent": BehaviorProfile(
-        name="observe_agent",
+    "observe": Behavior(
+        key="observe",
         instructions=dedent(
             """
             You are a research observation agent. Your role is to analyze the current state of research and provide thoughtful observations.
@@ -174,9 +174,20 @@ _PROFILES: Dict[str, BehaviorProfile] = {
             - Strategic recommendations for next steps
             """
         ).strip(),
+        runtime_template=dedent(
+            """
+            You are starting iteration [[ITERATION]] of your research process.
+
+            ORIGINAL QUERY:
+            [[QUERY]]
+
+            HISTORY OF ACTIONS, FINDINGS AND THOUGHTS:
+            [[HISTORY]]
+            """
+        ).strip(),
     ),
-    "writer_agent": BehaviorProfile(
-        name="writer_agent",
+    "writer": Behavior(
+        key="writer",
         instructions=dedent(
             """
             You are a technical writing agent specialized in creating comprehensive data science reports.
@@ -201,9 +212,21 @@ _PROFILES: Dict[str, BehaviorProfile] = {
             Focus on creating professional, comprehensive reports that effectively communicate the research findings and their practical implications.
             """
         ).strip(),
+        runtime_template=dedent(
+            """
+            Provide a response based on the query and findings below with as much detail as possible[[GUIDELINES_BLOCK]]
+
+            QUERY: [[USER_PROMPT]]
+
+            DATASET: [[DATA_PATH]]
+
+            FINDINGS:
+            [[FINDINGS]]
+            """
+        ).strip(),
     ),
-    "evaluate_agent": BehaviorProfile(
-        name="evaluate_agent",
+    "evaluate": Behavior(
+        key="evaluate",
         instructions=dedent(
             """
             You are a research evaluation agent. Analyze research progress and determine if goals have been met.
@@ -220,9 +243,21 @@ _PROFILES: Dict[str, BehaviorProfile] = {
             - reasoning: clear explanation of your evaluation
             """
         ).strip(),
+        runtime_template=dedent(
+            """
+            Current Iteration Number: [[ITERATION]]
+            Time Elapsed: [[ELAPSED_MINUTES]] minutes of maximum [[MAX_MINUTES]] minutes
+
+            ORIGINAL QUERY:
+            [[QUERY]]
+
+            HISTORY OF ACTIONS, FINDINGS AND THOUGHTS:
+            [[HISTORY]]
+            """
+        ).strip(),
     ),
-    "memory_agent": BehaviorProfile(
-        name="memory_agent",
+    "memory": Behavior(
+        key="memory",
         instructions=dedent(
             """
             You are a memory agent. Your role is to store and retrieve information from the conversation history.
@@ -252,12 +287,26 @@ _PROFILES: Dict[str, BehaviorProfile] = {
             Strictly avoid fabricating, inferring, or exaggerating any information not present in the conversation. Only output information that is certain and explicitly stated.
             """
         ).strip(),
+        runtime_template=dedent(
+            """
+            You are at the end of iteration [[ITERATION]]. You need to generate a comprehensive and useful summary.
+
+            ORIGINAL QUERY:
+            [[QUERY]]
+
+            LAST SUMMARY:
+            [[LAST_SUMMARY]]
+
+            CONVERSATION HISTORY:
+            [[CONVERSATION_HISTORY]]
+            """
+        ).strip(),
     ),
     # ------------------------------------------------------------------
     # Simplified routing variants for task-specific pipelines
     # ------------------------------------------------------------------
-    "routing_agent_simple": BehaviorProfile(
-        name="routing_agent_simple",
+    "routing_simple": Behavior(
+        key="routing_simple",
         instructions=dedent(
             """
             You are a task routing agent. Analyze the user query and create a task for the data_analysis_agent.
@@ -275,9 +324,10 @@ _PROFILES: Dict[str, BehaviorProfile] = {
             - gap: the knowledge gap being addressed
             """
         ).strip(),
+        runtime_template="[[QUERY]]",  # Simple pass-through
     ),
-    "routing_agent_simple_notion": BehaviorProfile(
-        name="routing_agent_simple_notion",
+    "routing_simple_notion": Behavior(
+        key="routing_simple_notion",
         instructions=dedent(
             """
             You are a task routing agent. Analyze the user query and create a task for the notion_agent.
@@ -294,9 +344,10 @@ _PROFILES: Dict[str, BehaviorProfile] = {
             - gap: the knowledge gap being addressed
             """
         ).strip(),
+        runtime_template="[[QUERY]]",  # Simple pass-through
     ),
-    "routing_agent_simple_browser": BehaviorProfile(
-        name="routing_agent_simple_browser",
+    "routing_simple_browser": Behavior(
+        key="routing_simple_browser",
         instructions=dedent(
             """
             You are a task routing agent. Analyze the user query and create a task for the browser_agent.
@@ -316,9 +367,10 @@ _PROFILES: Dict[str, BehaviorProfile] = {
             - gap: the knowledge gap being addressed
             """
         ).strip(),
+        runtime_template="[[QUERY]]",  # Simple pass-through
     ),
-    "routing_agent_simple_chrome": BehaviorProfile(
-        name="routing_agent_simple_chrome",
+    "routing_simple_chrome": Behavior(
+        key="routing_simple_chrome",
         instructions=dedent(
             """
             You are a task routing agent. Analyze the user query and create a task for the chrome_agent.
@@ -338,39 +390,43 @@ _PROFILES: Dict[str, BehaviorProfile] = {
             - gap: the knowledge gap being addressed
             """
         ).strip(),
+        runtime_template="[[QUERY]]",  # Simple pass-through
     ),
     # ------------------------------------------------------------------
     # MCP tool agents
     # ------------------------------------------------------------------
-    "notion_agent": BehaviorProfile(
-        name="notion_agent",
+    "notion": Behavior(
+        key="notion",
         instructions=dedent(
             """
             You are a notion agent. Your task is to interact with the notion MCP server following the instructions provided.
             """
         ).strip(),
+        runtime_template="[[INSTRUCTIONS]]",  # Simple pass-through
     ),
-    "browser_agent": BehaviorProfile(
-        name="browser_agent",
+    "browser": Behavior(
+        key="browser",
         instructions=dedent(
             """
             You are a browser agent. Your task is to interact with the browser MCP server following the instructions provided.
             """
         ).strip(),
+        runtime_template="[[INSTRUCTIONS]]",  # Simple pass-through
     ),
-    "chrome_agent": BehaviorProfile(
-        name="chrome_agent",
+    "chrome": Behavior(
+        key="chrome",
         instructions=dedent(
             """
             You are a chrome agent. Your task is to interact with the chrome browser following the instructions provided.
             """
         ).strip(),
+        runtime_template="[[INSTRUCTIONS]]",  # Simple pass-through
     ),
     # ------------------------------------------------------------------
     # Data tool agents
     # ------------------------------------------------------------------
-    "data_loader_agent": BehaviorProfile(
-        name="data_loader_agent",
+    "data_loader": Behavior(
+        key="data_loader",
         instructions=dedent(
             """
             You are a data loading specialist. Your task is to load and inspect datasets.
@@ -390,9 +446,10 @@ _PROFILES: Dict[str, BehaviorProfile] = {
             [[OUTPUT_SCHEMA]]
             """
         ).strip(),
+        runtime_template="[[TASK]]",  # Simple pass-through for data agents
     ),
-    "data_analysis_agent": BehaviorProfile(
-        name="data_analysis_agent",
+    "data_analysis": Behavior(
+        key="data_analysis",
         instructions=dedent(
             """
             You are an exploratory data analysis specialist. Your task is to analyze data patterns and relationships.
@@ -415,9 +472,10 @@ _PROFILES: Dict[str, BehaviorProfile] = {
             [[OUTPUT_SCHEMA]]
             """
         ).strip(),
+        runtime_template="[[TASK]]",  # Simple pass-through for data agents
     ),
-    "preprocessing_agent": BehaviorProfile(
-        name="preprocessing_agent",
+    "preprocessing": Behavior(
+        key="preprocessing",
         instructions=dedent(
             """
             You are a data preprocessing specialist. Your task is to clean and transform datasets.
@@ -449,9 +507,10 @@ _PROFILES: Dict[str, BehaviorProfile] = {
             [[OUTPUT_SCHEMA]]
             """
         ).strip(),
+        runtime_template="[[TASK]]",  # Simple pass-through for data agents
     ),
-    "model_training_agent": BehaviorProfile(
-        name="model_training_agent",
+    "model_training": Behavior(
+        key="model_training",
         instructions=dedent(
             """
             You are a machine learning specialist. Your task is to train and evaluate models.
@@ -483,9 +542,10 @@ _PROFILES: Dict[str, BehaviorProfile] = {
             [[OUTPUT_SCHEMA]]
             """
         ).strip(),
+        runtime_template="[[TASK]]",  # Simple pass-through for data agents
     ),
-    "evaluation_agent": BehaviorProfile(
-        name="evaluation_agent",
+    "evaluation": Behavior(
+        key="evaluation",
         instructions=dedent(
             """
             You are a model evaluation specialist. Your task is to assess model performance comprehensively.
@@ -513,9 +573,10 @@ _PROFILES: Dict[str, BehaviorProfile] = {
             [[OUTPUT_SCHEMA]]
             """
         ).strip(),
+        runtime_template="[[TASK]]",  # Simple pass-through for data agents
     ),
-    "visualization_agent": BehaviorProfile(
-        name="visualization_agent",
+    "visualization": Behavior(
+        key="visualization",
         instructions=dedent(
             """
             You are a data visualization specialist. Your task is to create insightful visualizations.
@@ -547,9 +608,10 @@ _PROFILES: Dict[str, BehaviorProfile] = {
             [[OUTPUT_SCHEMA]]
             """
         ).strip(),
+        runtime_template="[[TASK]]",  # Simple pass-through for data agents
     ),
-    "code_generation_agent": BehaviorProfile(
-        name="code_generation_agent",
+    "code_generation": Behavior(
+        key="code_generation",
         instructions=dedent(
             """
             You are a senior data scientist and software engineer. Generate complete, production-ready Python code solutions.
@@ -567,114 +629,12 @@ _PROFILES: Dict[str, BehaviorProfile] = {
             Focus on creating comprehensive, executable solutions.
             """
         ).strip(),
+        runtime_template="[[TASK]]",  # Simple pass-through for data agents
     ),
 }
 
-RUNTIME_PROMPTS: Dict[str, Dict[str, PromptTemplate]] = {
-    # ------------------------------------------------------------------
-    # Iterative research prompts (Data Scientist pipelines)
-    # ------------------------------------------------------------------
-    "observe_agent": {
-        "research_iteration": PromptTemplate(
-            name="research_iteration",
-            template=dedent(
-                """
-                You are starting iteration [[ITERATION]] of your research process.
+# Public registry instance used throughout the application.
+behavior_registry = BehaviorRegistry(_BEHAVIORS)
 
-                ORIGINAL QUERY:
-                [[QUERY]]
-
-                HISTORY OF ACTIONS, FINDINGS AND THOUGHTS:
-                [[HISTORY]]
-                """
-            ).strip(),
-        ),
-    },
-    "evaluate_agent": {
-        "research_iteration": PromptTemplate(
-            name="research_iteration",
-            template=dedent(
-                """
-                Current Iteration Number: [[ITERATION]]
-                Time Elapsed: [[ELAPSED_MINUTES]] minutes of maximum [[MAX_MINUTES]] minutes
-
-                ORIGINAL QUERY:
-                [[QUERY]]
-
-                HISTORY OF ACTIONS, FINDINGS AND THOUGHTS:
-                [[HISTORY]]
-                """
-            ).strip(),
-        ),
-    },
-    "routing_agent": {
-        "research_iteration": PromptTemplate(
-            name="research_iteration",
-            template=dedent(
-                """
-                ORIGINAL QUERY:
-                [[QUERY]]
-
-                KNOWLEDGE GAP TO ADDRESS:
-                [[GAP]]
-
-
-                HISTORY OF ACTIONS, FINDINGS AND THOUGHTS:
-                [[HISTORY]]
-                """
-            ).strip(),
-        ),
-        "single_agent_routing": PromptTemplate(
-            name="single_agent_routing",
-            template=dedent(
-                """
-                QUERY: [[QUERY]]
-
-                Available agent: [[AVAILABLE_AGENT]]
-
-                Create a routing plan with a task for the [[AVAILABLE_AGENT]].
-                """
-            ).strip(),
-        ),
-    },
-    "writer_agent": {
-        "final_report": PromptTemplate(
-            name="final_report",
-            template=dedent(
-                """
-                Provide a response based on the query and findings below with as much detail as possible[[GUIDELINES_BLOCK]]
-
-                QUERY: [[USER_PROMPT]]
-
-                DATASET: [[DATA_PATH]]
-
-                FINDINGS:
-                [[FINDINGS]]
-                """
-            ).strip(),
-        ),
-    },
-    "memory_agent": {
-        "compression_iteration": PromptTemplate(
-            name="compression_iteration",
-            template=dedent(
-                """
-                You are at the end of iteration [[ITERATION]]. You need to generate a comprehensive and useful summary.
-
-                ORIGINAL QUERY:
-                [[QUERY]]
-
-                LAST SUMMARY:
-                [[LAST_SUMMARY]]
-
-                CONVERSATION HISTORY:
-                [[CONVERSATION_HISTORY]]
-                """
-            ).strip(),
-        ),
-    },
-}
-
-# Public store instances used throughout the application.
-behavior_profiles = BehaviorProfileStore(_PROFILES)
-runtime_prompts = RuntimePromptStore(RUNTIME_PROMPTS)
+# Backward compatibility: provide old behavior_profiles interface
+behavior_profiles = behavior_registry

@@ -27,8 +27,8 @@ def create_model_training_agent(cfg: BaseConfig, spec: Optional[dict] = None) ->
     selected_model = cfg.llm.main_model
     spec = spec or {}
 
-    profile_name = spec.get("profile") or "model_training_agent"
-    profile = behavior_profiles.get_optional(profile_name) or behavior_profiles.get("model_training_agent")
+    profile_name = spec.get("profile") or "model_training"
+    profile = behavior_profiles.get_optional(profile_name) or behavior_profiles.get("model_training")
 
     instructions = spec.get(
         "instructions",

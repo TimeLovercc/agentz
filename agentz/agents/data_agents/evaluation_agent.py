@@ -27,8 +27,8 @@ def create_evaluation_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Age
     selected_model = cfg.llm.main_model
     spec = spec or {}
 
-    profile_name = spec.get("profile") or "evaluation_agent"
-    profile = behavior_profiles.get_optional(profile_name) or behavior_profiles.get("evaluation_agent")
+    profile_name = spec.get("profile") or "evaluation"
+    profile = behavior_profiles.get_optional(profile_name) or behavior_profiles.get("evaluation")
 
     instructions = spec.get(
         "instructions",

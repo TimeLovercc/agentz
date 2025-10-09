@@ -27,8 +27,8 @@ def create_visualization_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> 
     selected_model = cfg.llm.main_model
     spec = spec or {}
 
-    profile_name = spec.get("profile") or "visualization_agent"
-    profile = behavior_profiles.get_optional(profile_name) or behavior_profiles.get("visualization_agent")
+    profile_name = spec.get("profile") or "visualization"
+    profile = behavior_profiles.get_optional(profile_name) or behavior_profiles.get("visualization")
 
     instructions = spec.get(
         "instructions",

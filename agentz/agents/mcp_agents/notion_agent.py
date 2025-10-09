@@ -42,8 +42,8 @@ def create_notion_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
     spec = spec or {}
     server = get_notion_server()
 
-    profile_name = spec.get("profile") or "notion_agent"
-    profile = behavior_profiles.get_optional(profile_name) or behavior_profiles.get("notion_agent")
+    profile_name = spec.get("profile") or "notion"
+    profile = behavior_profiles.get_optional(profile_name) or behavior_profiles.get("notion")
 
     instructions = spec.get("instructions", profile.render())
     agent_kwargs = profile.params_with(spec.get("params"))

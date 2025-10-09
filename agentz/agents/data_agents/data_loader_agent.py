@@ -27,8 +27,8 @@ def create_data_loader_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Ag
     selected_model = cfg.llm.main_model
     spec = spec or {}
 
-    profile_name = spec.get("profile") or "data_loader_agent"
-    profile = behavior_profiles.get_optional(profile_name) or behavior_profiles.get("data_loader_agent")
+    profile_name = spec.get("profile") or "data_loader"
+    profile = behavior_profiles.get_optional(profile_name) or behavior_profiles.get("data_loader")
 
     instructions = spec.get(
         "instructions",
