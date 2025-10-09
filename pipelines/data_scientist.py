@@ -14,6 +14,7 @@ from agentz.memory.conversation import ConversationState, ToolExecutionResult
 from agentz.memory.global_memory import global_memory
 from pipelines.base import BasePipeline
 from pipelines.flow_runner import FlowNode, FlowRunner, IterationFlow
+from agentz.flow.runtime_objects import AgentCapability, PipelineContext
 
 
 class DataScientistPipeline(BasePipeline):
@@ -31,11 +32,11 @@ class DataScientistPipeline(BasePipeline):
         )
 
         # Setup manager agents
-        self.agents: Dict[str, Any] = {
-            "observe_agent": create_agents("observe_agent", config),
-            "evaluate_agent": create_agents("evaluate_agent", config),
-            "routing_agent": create_agents("routing_agent", config),
-            "writer_agent": create_agents("writer_agent", config),
+        self.agents: Dict[str, AgentCapability] = {
+            "observe_agent": AgentCapability("observe_agent", create_agents("observe_agent", config)),
+            "evaluate_agent": AgentCapability("evaluate_agent", create_agents("evaluate_agent", config)),
+            "routing_agent": AgentCapability("routing_agent", create_agents("routing_agent", config)),
+            "writer_agent": AgentCapability("writer_agent", create_agents("writer_agent", config)),
         }
 
         # Setup specialised tool agents
@@ -61,6 +62,7 @@ class DataScientistPipeline(BasePipeline):
             iteration_flow=self.iteration_flow,
             final_nodes=self.final_nodes,
         )
+        self.pipeline_context = PipelineContext(self.conversation)
 
         # Optional report configuration
         self.report_length: Optional[str] = None
@@ -108,7 +110,7 @@ class DataScientistPipeline(BasePipeline):
                 span_type="tool",
                 printer_key="route",
                 printer_title="Routing",
-                condition=lambda state: not state.complete,
+                condition=lambda ctx: not ctx.state.complete,
             ),
             FlowNode(
                 name="tools",
@@ -160,7 +162,7 @@ class DataScientistPipeline(BasePipeline):
         self.conversation.start_timer()
 
         # Execute the flow
-        await self.flow_runner.execute(self.conversation)
+        await self.flow_runner.execute(self.pipeline_context)
 
         # Finalise persisted memory and artefacts
         self.update_printer("research", "Research workflow complete", is_done=True)
@@ -174,12 +176,13 @@ class DataScientistPipeline(BasePipeline):
     # ------------------------------------------------------------------
     # Flow condition helpers
     # ------------------------------------------------------------------
-    def _should_continue_loop(self, state: ConversationState) -> bool:
-        if state.complete:
+    def _should_continue_loop(self, context: PipelineContext) -> bool:
+        if context.state.complete:
             return False
         return self._check_constraints()
 
-    def _has_pending_tools(self, state: ConversationState) -> bool:
+    def _has_pending_tools(self, context: PipelineContext) -> bool:
+        state = context.state
         if state.complete:
             return False
         iteration = state.current_iteration
@@ -188,7 +191,8 @@ class DataScientistPipeline(BasePipeline):
     # ------------------------------------------------------------------
     # Input builders
     # ------------------------------------------------------------------
-    def _build_observation_payload(self, state: ConversationState) -> Dict[str, Any]:
+    def _build_observation_payload(self, context: PipelineContext) -> Dict[str, Any]:
+        state = context.state
         history = state.iteration_history()
         if not history:
             history = "No previous actions, findings or thoughts available."
@@ -198,7 +202,8 @@ class DataScientistPipeline(BasePipeline):
             "HISTORY": history,
         }
 
-    def _build_evaluation_payload(self, state: ConversationState) -> Dict[str, Any]:
+    def _build_evaluation_payload(self, context: PipelineContext) -> Dict[str, Any]:
+        state = context.state
         history = state.iteration_history(include_current=True)
         if not history:
             history = "No previous actions, findings or thoughts available."
@@ -210,7 +215,8 @@ class DataScientistPipeline(BasePipeline):
             "HISTORY": history,
         }
 
-    def _build_routing_payload(self, state: ConversationState) -> Dict[str, Any]:
+    def _build_routing_payload(self, context: PipelineContext) -> Dict[str, Any]:
+        state = context.state
         history = state.iteration_history(include_current=True)
         if not history:
             history = "No previous actions, findings or thoughts available."
@@ -221,7 +227,8 @@ class DataScientistPipeline(BasePipeline):
             "HISTORY": history,
         }
 
-    def _build_writer_payload(self, state: ConversationState) -> Dict[str, Any]:
+    def _build_writer_payload(self, context: PipelineContext) -> Dict[str, Any]:
+        state = context.state
         findings_text = state.findings_text() or "No findings available yet."
         guidelines_chunks = []
         if self.report_length:
@@ -242,13 +249,15 @@ class DataScientistPipeline(BasePipeline):
     # ------------------------------------------------------------------
     # Output handlers
     # ------------------------------------------------------------------
-    def _handle_observation_output(self, state: ConversationState, result: Any) -> None:
+    def _handle_observation_output(self, context: PipelineContext, result: Any) -> None:
+        state = context.state
         final_output = getattr(result, "final_output", None)
         if final_output is None:
             final_output = str(result)
         state.current_iteration.observation = final_output
 
-    def _handle_evaluation_output(self, state: ConversationState, result: KnowledgeGapOutput) -> None:
+    def _handle_evaluation_output(self, context: PipelineContext, result: KnowledgeGapOutput) -> None:
+        state = context.state
         state.current_iteration.evaluation = result
         if result.research_complete:
             state.mark_research_complete()
@@ -256,10 +265,12 @@ class DataScientistPipeline(BasePipeline):
         if result.outstanding_gaps:
             state.current_iteration.selected_gap = result.outstanding_gaps[0]
 
-    def _handle_routing_output(self, state: ConversationState, result: AgentSelectionPlan) -> None:
+    def _handle_routing_output(self, context: PipelineContext, result: AgentSelectionPlan) -> None:
+        state = context.state
         state.current_iteration.route_plan = result
 
-    def _handle_writer_output(self, state: ConversationState, result: Any) -> None:
+    def _handle_writer_output(self, context: PipelineContext, result: Any) -> None:
+        state = context.state
         final_output = getattr(result, "final_output", None)
         if final_output is None:
             final_output = str(result)
@@ -268,7 +279,8 @@ class DataScientistPipeline(BasePipeline):
     # ------------------------------------------------------------------
     # Tool execution runner
     # ------------------------------------------------------------------
-    async def _execute_tool_tasks(self, state: ConversationState, context) -> None:
+    async def _execute_tool_tasks(self, pipeline_context: PipelineContext, exec_ctx) -> None:
+        state = pipeline_context.state
         iteration = state.current_iteration
         plan = iteration.route_plan
         if not plan or not plan.tasks:
@@ -289,11 +301,11 @@ class DataScientistPipeline(BasePipeline):
                 span_name=task.agent,
                 span_type="tool",
                 output_model=ToolAgentOutput,
-                printer_key=f"{context.iteration_group_id}:tool:{task.agent}"
-                if context.iteration_group_id
+                printer_key=f"{exec_ctx.iteration_group_id}:tool:{task.agent}"
+                if exec_ctx.iteration_group_id
                 else f"tool:{task.agent}",
                 printer_title=f"Tool: {task.agent}",
-                printer_group_id=context.iteration_group_id,
+                printer_group_id=exec_ctx.iteration_group_id,
             )
 
             output = result
@@ -313,15 +325,15 @@ class DataScientistPipeline(BasePipeline):
         for coro in asyncio.as_completed(tasks):
             result = await coro
             printer_key = (
-                f"{context.iteration_group_id}:tool:{result.task.agent}"
-                if context.iteration_group_id
+                f"{exec_ctx.iteration_group_id}:tool:{result.task.agent}"
+                if exec_ctx.iteration_group_id
                 else f"tool:{result.task.agent}"
             )
             self.update_printer(
                 key=printer_key,
                 message=f"Completed {result.task.agent}",
                 is_done=True,
-                group_id=context.iteration_group_id,
+                group_id=exec_ctx.iteration_group_id,
             )
             results.append(result)
 

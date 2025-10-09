@@ -4,9 +4,9 @@ from typing import Any, Dict, List
 
 from agentz.agents.manager_agents.memory_agent import MemoryAgentOutput
 from agentz.agents.registry import create_agents
-from agentz.memory.conversation import ConversationState
 from pipelines.data_scientist import DataScientistPipeline
 from pipelines.flow_runner import FlowNode, FlowRunner, IterationFlow
+from agentz.flow.runtime_objects import AgentCapability, PipelineContext
 
 
 class DataScientistMemoryPipeline(DataScientistPipeline):
@@ -17,7 +17,7 @@ class DataScientistMemoryPipeline(DataScientistPipeline):
         super().__init__(config)
 
         # Augment manager agents with memory agent
-        self.agents["memory_agent"] = create_agents("memory_agent", config)
+        self.agents["memory_agent"] = AgentCapability("memory_agent", create_agents("memory_agent", config))
 
         # Rebuild flow with memory node included
         self.iteration_flow = IterationFlow(
@@ -35,7 +35,8 @@ class DataScientistMemoryPipeline(DataScientistPipeline):
     # ------------------------------------------------------------------
     # Conversation helpers
     # ------------------------------------------------------------------
-    def _build_observation_payload(self, state: ConversationState) -> Dict[str, Any]:
+    def _build_observation_payload(self, context: PipelineContext) -> Dict[str, Any]:
+        state = context.state
         history = state.history_with_summary()
         if not history:
             history = "No previous actions, findings or thoughts available."
@@ -45,7 +46,8 @@ class DataScientistMemoryPipeline(DataScientistPipeline):
             "HISTORY": history,
         }
 
-    def _build_evaluation_payload(self, state: ConversationState) -> Dict[str, Any]:
+    def _build_evaluation_payload(self, context: PipelineContext) -> Dict[str, Any]:
+        state = context.state
         history = state.history_with_summary()
         if not history:
             history = "No previous actions, findings or thoughts available."
@@ -57,7 +59,8 @@ class DataScientistMemoryPipeline(DataScientistPipeline):
             "HISTORY": history,
         }
 
-    def _build_routing_payload(self, state: ConversationState) -> Dict[str, Any]:
+    def _build_routing_payload(self, context: PipelineContext) -> Dict[str, Any]:
+        state = context.state
         history = state.history_with_summary()
         if not history:
             history = "No previous actions, findings or thoughts available."
@@ -91,7 +94,8 @@ class DataScientistMemoryPipeline(DataScientistPipeline):
         )
         return nodes
 
-    def _build_memory_payload(self, state: ConversationState) -> Dict[str, Any]:
+    def _build_memory_payload(self, context: PipelineContext) -> Dict[str, Any]:
+        state = context.state
         unsummarized = state.unsummarized_history()
         if not unsummarized:
             unsummarized = "No previous unsummarized actions, findings or thoughts available."
@@ -102,10 +106,11 @@ class DataScientistMemoryPipeline(DataScientistPipeline):
             "CONVERSATION_HISTORY": unsummarized,
         }
 
-    def _handle_memory_output(self, state: ConversationState, result: MemoryAgentOutput) -> None:
-        state.update_summary(result.summary)
+    def _handle_memory_output(self, context: PipelineContext, result: MemoryAgentOutput) -> None:
+        context.state.update_summary(result.summary)
 
-    def _should_run_memory_node(self, state: ConversationState) -> bool:
+    def _should_run_memory_node(self, context: PipelineContext) -> bool:
+        state = context.state
         if state.complete:
             return False
         return bool(state.unsummarized_history())
