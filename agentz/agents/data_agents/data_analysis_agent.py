@@ -10,7 +10,7 @@ from agentz.agents.registry import register_agent, ToolAgentOutput
 from agentz.configuration.base import BaseConfig
 from agentz.llm.llm_setup import model_supports_json_and_tool_calls
 from agentz.utils import create_type_parser
-from agentz.memory.behavior_profiles import behavior_profiles
+from agentz.context.behavior_profiles import behavior_profiles
 
 
 @register_agent("data_analysis_agent", aliases=["data_analysis", "analysis"])

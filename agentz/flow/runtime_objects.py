@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 from pydantic import BaseModel
 
 from agentz.context.engine import ContextEngine
-from agentz.memory.conversation import ConversationState
+from agentz.context.conversation import ConversationState
 
 
 @dataclass

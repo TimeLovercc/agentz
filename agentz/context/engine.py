@@ -5,8 +5,8 @@ from typing import Any, Callable, Dict, Mapping, MutableMapping, Optional, Proto
 
 from pydantic import BaseModel
 
-from agentz.memory.behavior_profiles import runtime_prompts
-from agentz.memory.conversation import ConversationState, IterationRecord, ToolExecutionResult
+from agentz.context.behavior_profiles import runtime_prompts
+from agentz.context.conversation import ConversationState, IterationRecord, ToolExecutionResult
 
 Payload = Dict[str, Any]
 

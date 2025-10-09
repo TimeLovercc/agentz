@@ -10,7 +10,7 @@ import base64
 from io import BytesIO
 from agents import function_tool
 from agents.run_context import RunContextWrapper
-from agentz.memory.pipeline_context import PipelineDataStore
+from agentz.context.pipeline_context import PipelineDataStore
 from .helpers import load_or_get_dataframe
 from loguru import logger
 

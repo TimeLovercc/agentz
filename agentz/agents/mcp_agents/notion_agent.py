@@ -16,7 +16,7 @@ from agentz.mcp.servers.chrome_devtools.server import ChromeDevToolsMCP
 from agents.mcp import MCPServer, MCPServerStdio, MCPServerSse
 from agents import HostedMCPTool
 import asyncio
-from agentz.memory.behavior_profiles import behavior_profiles
+from agentz.context.behavior_profiles import behavior_profiles
 
 async def get_notion_server():
     async with MCPServerSse(

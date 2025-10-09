@@ -10,8 +10,8 @@ from agentz.agents.manager_agents.evaluate_agent import KnowledgeGapOutput
 from agentz.agents.manager_agents.routing_agent import AgentSelectionPlan, AgentTask
 from agentz.agents.registry import ToolAgentOutput, create_agents
 from agentz.flow import auto_trace
-from agentz.memory.conversation import ConversationState, ToolExecutionResult
-from agentz.memory.global_memory import global_memory
+from agentz.context.conversation import ConversationState, ToolExecutionResult
+from agentz.context.global_memory import global_memory
 from pipelines.base import BasePipeline
 from pipelines.flow_runner import FlowNode, FlowRunner, IterationFlow
 from agentz.flow.runtime_objects import AgentCapability, PipelineContext

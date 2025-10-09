@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, Optional
 
 from agents.tracing.create import agent_span, function_span, trace
 from agentz.utils import Printer
-from agentz.memory.pipeline_context import PipelineDataStore
+from agentz.context.pipeline_context import PipelineDataStore
 from agentz.reporting import RunReporter
 
 # Context variable to store the current execution context

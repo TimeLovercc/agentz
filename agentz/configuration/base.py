@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field
 
 from agentz.utils import load_config
-from agentz.memory.behavior_profiles import behavior_profiles
+from agentz.context.behavior_profiles import behavior_profiles
 
 
 class BaseConfig(BaseModel):

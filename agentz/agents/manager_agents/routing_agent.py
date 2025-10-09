@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from agentz.agents.base import ResearchAgent as Agent
 from agentz.configuration.base import BaseConfig, get_agent_spec
 from agentz.agents.registry import register_agent
-from agentz.memory.behavior_profiles import behavior_profiles
+from agentz.context.behavior_profiles import behavior_profiles
 
 
 class AgentTask(BaseModel):

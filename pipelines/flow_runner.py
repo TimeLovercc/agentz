@@ -5,7 +5,7 @@ from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
 
 from pydantic import BaseModel
 
-from agentz.memory.conversation import ConversationState
+from agentz.context.conversation import ConversationState
 from agentz.flow.runtime_objects import AgentCapability, PipelineContext
 
 

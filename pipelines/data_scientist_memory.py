@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from agentz.memory.conversation import ConversationState
+from agentz.context.conversation import ConversationState
 from agentz.agents.manager_agents.memory_agent import MemoryAgentOutput
 from agentz.agents.registry import create_agents
 from pipelines.data_scientist import DataScientistPipeline

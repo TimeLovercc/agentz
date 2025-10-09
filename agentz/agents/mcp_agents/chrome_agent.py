@@ -14,7 +14,7 @@ from agentz.llm.llm_setup import model_supports_json_and_tool_calls
 from agentz.utils import create_type_parser
 from agentz.mcp.servers.chrome_devtools.server import ChromeDevToolsMCP
 from agents.mcp import MCPServer, MCPServerStdio
-from agentz.memory.behavior_profiles import behavior_profiles
+from agentz.context.behavior_profiles import behavior_profiles
 
 
 @register_agent("chrome_agent", aliases=["chrome"])
