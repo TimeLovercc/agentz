@@ -22,3 +22,14 @@ agents:
       
   browser_agent:
     profile: browser_agent
+
+mcp:
+  servers:
+    browser:
+      type: stdio
+      name: Browser
+      params:
+        command: npx
+        args:
+          - -y
+          - "@browsermcp/mcp@latest"
