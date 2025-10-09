@@ -108,24 +108,61 @@ pipe.run_sync()
 
 ## Architecture
 
+AgentZ is organised around a **central conversation state** and a set of declarative
+flow specifications that describe how agents collaborate. The main
+components you will interact with are:
+
+- **`pipelines/`** – High level orchestration that wires agents together.
+- **`agentz/agents/`** – Capability definitions for manager agents and tool agents.
+- **`agentz/flow/`** – Flow primitives (`FlowRunner`, `FlowNode`, `IterationFlow`) that
+  execute declarative pipelines.
+- **`agentz/memory/`** – Structured state management (`ConversationState`,
+  `ToolExecutionResult`, global memory helpers).
+- **`examples/`** – Example scripts showing end-to-end usage.
+
 ```
-agentx/
+agentz/
 ├── pipelines/
-│   ├── base.py              # Base pipeline with config management
-│   └── data_scientist.py    # Reference implementation
-├── src/
+│   ├── base.py               # Base pipeline with config management & helpers
+│   ├── flow_runner.py        # Declarative flow executor utilities
+│   └── data_scientist.py     # Reference research pipeline
+├── agentz/
 │   ├── agents/
-│   │   ├── manager_agents/  # Orchestration agents
-│   │   └── tool_agents/     # Task-specific agents
-│   ├── llm/
-│   │   └── llm_setup.py     # LLM configuration
-│   ├── memory/
-│   │   └── global_memory.py # Persistent memory system
-│   └── tools/               # Agent tools and utilities
-├── examples/
-│   └── data_science.py      # Example workflows
-└── data/                    # Sample datasets
+│   │   ├── manager_agents/   # Observe, evaluate, routing, writer agents
+│   │   └── tool_agents/      # Specialised tool executors
+│   ├── flow/                 # Flow node definitions and runtime objects
+│   ├── memory/               # Conversation state & persistence utilities
+│   ├── llm/                  # LLM adapters and setup helpers
+│   └── tools/                # Built-in tools
+└── examples/
+    └── data_science.py       # Example workflows
 ```
+
+### Declarative Pipeline Flow
+
+The reference `DataScientistPipeline` models an entire research workflow using
+three building blocks:
+
+1. **Central ConversationState** – A shared store that captures every field any
+   agent might read or write (iteration metadata, gaps, observations, tool
+   results, timing, final report, etc.). Each loop creates a new
+   `IterationRecord`, enabling partial updates and clean tracking of tool
+   outcomes.
+2. **Structured IO Contracts** – Each agent step declares the Pydantic model it
+   expects and produces (for example `KnowledgeGapOutput` or
+   `AgentSelectionPlan`). Input builders map slices of `ConversationState` into
+   those models and output handlers merge the validated results back into the
+   central state.
+3. **Declarative FlowRunner** – The pipeline defines an `IterationFlow` of
+   `FlowNode`s such as observe → evaluate → route → tools. Loop and termination
+   logic are expressed with predicates (`loop_condition`, `condition`), so the
+   executor can stop when evaluation marks `state.complete` or constraints are
+   reached. Finalisation steps (like the writer agent) run after the iteration
+   loop using the same structured IO.
+
+Because the flow is declarative and all state is centralised, extending the
+pipeline is as simple as adding a new node, output field, or tool capability—no
+custom `run()` logic is required beyond sequencing the flow runner.
 
 ## Benchmarks
 
