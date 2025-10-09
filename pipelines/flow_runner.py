@@ -21,6 +21,7 @@ class FlowNode:
 
     name: str
     agent_key: Optional[str] = None
+    behavior: Optional[str] = None
     profile: Optional[str] = None
     template: Optional[str] = None
     input_builder: Optional[InputBuilder] = None
@@ -155,15 +156,20 @@ class FlowRunner:
 
         if node.agent_key is None:
             raise ValueError(f"Flow node '{node.name}' must define an agent_key or custom_runner.")
-        if node.profile is None or node.template is None:
-            raise ValueError(f"Flow node '{node.name}' must define profile and template for prompt rendering.")
         if node.input_builder is None:
             raise ValueError(f"Flow node '{node.name}' must define an input_builder.")
         if node.output_handler is None:
             raise ValueError(f"Flow node '{node.name}' must define an output_handler.")
 
         payload = node.input_builder(pipeline_context)
-        instructions = pipeline_context.render_prompt(node.profile, node.template, payload)
+        if node.behavior:
+            instructions = pipeline_context.render_behavior(node.behavior, payload)
+        else:
+            if node.profile is None or node.template is None:
+                raise ValueError(
+                    f"Flow node '{node.name}' must define profile and template when behavior is not provided."
+                )
+            instructions = pipeline_context.render_prompt(node.profile, node.template, payload)
 
         capability = exec_ctx.agents[node.agent_key]
         result = await capability.invoke(

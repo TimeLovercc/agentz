@@ -9,6 +9,8 @@ from loguru import logger
 from agentz.agents.manager_agents.evaluate_agent import KnowledgeGapOutput
 from agentz.agents.manager_agents.routing_agent import AgentSelectionPlan, AgentTask
 from agentz.agents.registry import ToolAgentOutput, create_agents
+from agentz.context.behavior_profiles import behavior_profiles
+from agentz.context.engine import BehaviorProfiles, BehaviorTemplate, ContextEngine
 from agentz.flow import auto_trace
 from agentz.context.conversation import ConversationState, ToolExecutionResult
 from agentz.context.global_memory import global_memory
@@ -23,13 +25,15 @@ class DataScientistPipeline(BasePipeline):
     def __init__(self, config):
         super().__init__(config)
 
-        # Centralised conversation state for structured agent IO
-        self.conversation = ConversationState(
+        # Centralised context engine with shared conversation state
+        state = ConversationState(
             query="",
             data_path=self.config.data_path,
             max_iterations=self.max_iterations,
             max_minutes=self.max_time_minutes,
         )
+        behavior_profiles_bundle = self._build_behavior_profiles()
+        self.context = PipelineContext(state, behavior_profiles_bundle)
 
         # Setup manager agents
         self.agents: Dict[str, AgentCapability] = {
@@ -50,6 +54,10 @@ class DataScientistPipeline(BasePipeline):
         ]
         self.tool_agents: Dict[str, Any] = create_agents(tool_agent_names, config)
 
+        self.behavior_agents: Dict[str, str] = self._build_behavior_agent_map()
+        for behavior_key, agent_key in self.behavior_agents.items():
+            self.engine.register_agent(behavior_key, self.agents[agent_key])
+
         # Build declarative flow and runner
         self.iteration_flow = IterationFlow(
             nodes=self._build_iteration_nodes(),
@@ -66,24 +74,63 @@ class DataScientistPipeline(BasePipeline):
             iteration_flow=self.iteration_flow,
             final_nodes=self.final_nodes,
         )
-        self.pipeline_context = PipelineContext(self.conversation)
         self._register_context_bindings()
+
+    @property
+    def state(self) -> ConversationState:
+        return self.context.state
+
+    @property
+    def engine(self) -> ContextEngine:
+        return self.context.engine
+
+    # ------------------------------------------------------------------
+    # Behavior configuration
+    # ------------------------------------------------------------------
+    def _build_behavior_profiles(self) -> BehaviorProfiles:
+        behavior_specs = [
+            ("observe", "observe_agent", "research_iteration"),
+            ("evaluate", "evaluate_agent", "research_iteration"),
+            ("route", "routing_agent", "research_iteration"),
+            ("writer", "writer_agent", "final_report"),
+        ]
+        behaviors = []
+        for behavior_key, profile_name, template_name in behavior_specs:
+            profile = behavior_profiles.get(profile_name)
+            behaviors.append(
+                BehaviorTemplate(
+                    key=behavior_key,
+                    profile=profile_name,
+                    template=template_name,
+                    instructions=profile.instructions,
+                    params=dict(profile.params),
+                )
+            )
+        return BehaviorProfiles(*behaviors)
+
+    def _build_behavior_agent_map(self) -> Dict[str, str]:
+        return {
+            "observe": "observe_agent",
+            "evaluate": "evaluate_agent",
+            "route": "routing_agent",
+            "writer": "writer_agent",
+        }
 
     # ------------------------------------------------------------------
     # Flow configuration
     # ------------------------------------------------------------------
     def _register_context_bindings(self) -> None:
         """Register snapshot and output handlers with the context engine."""
-        ctx = self.pipeline_context
-        ctx.register_snapshot("observe_agent", self._observation_snapshot)
-        ctx.register_snapshot("evaluate_agent", self._evaluation_snapshot)
-        ctx.register_snapshot("routing_agent", self._routing_snapshot)
-        ctx.register_snapshot("writer_agent", self._writer_snapshot)
+        engine = self.engine
+        engine.register_snapshot("observe", self._observation_snapshot)
+        engine.register_snapshot("evaluate", self._evaluation_snapshot)
+        engine.register_snapshot("route", self._routing_snapshot)
+        engine.register_snapshot("writer", self._writer_snapshot)
 
-        ctx.register_output_handler("observe_agent", self._apply_observation_output)
-        ctx.register_output_handler("evaluate_agent", self._apply_evaluation_output)
-        ctx.register_output_handler("routing_agent", self._apply_routing_output)
-        ctx.register_output_handler("writer_agent", self._apply_writer_output)
+        engine.register_output_handler("observe", self._apply_observation_output)
+        engine.register_output_handler("evaluate", self._apply_evaluation_output)
+        engine.register_output_handler("route", self._apply_routing_output)
+        engine.register_output_handler("writer", self._apply_writer_output)
 
     def _observation_snapshot(self, state: ConversationState) -> Dict[str, Any]:
         history = state.iteration_history()
@@ -164,8 +211,7 @@ class DataScientistPipeline(BasePipeline):
             FlowNode(
                 name="observe",
                 agent_key="observe_agent",
-                profile="observe_agent",
-                template="research_iteration",
+                behavior="observe",
                 input_builder=self._build_observation_payload,
                 output_handler=self._handle_observation_output,
                 span_name="generate_observations",
@@ -176,8 +222,7 @@ class DataScientistPipeline(BasePipeline):
             FlowNode(
                 name="evaluate",
                 agent_key="evaluate_agent",
-                profile="evaluate_agent",
-                template="research_iteration",
+                behavior="evaluate",
                 input_builder=self._build_evaluation_payload,
                 output_model=KnowledgeGapOutput,
                 output_handler=self._handle_evaluation_output,
@@ -189,8 +234,7 @@ class DataScientistPipeline(BasePipeline):
             FlowNode(
                 name="route",
                 agent_key="routing_agent",
-                profile="routing_agent",
-                template="research_iteration",
+                behavior="route",
                 input_builder=self._build_routing_payload,
                 output_model=AgentSelectionPlan,
                 output_handler=self._handle_routing_output,
@@ -214,8 +258,7 @@ class DataScientistPipeline(BasePipeline):
             FlowNode(
                 name="writer",
                 agent_key="writer_agent",
-                profile="writer_agent",
-                template="final_report",
+                behavior="writer",
                 input_builder=self._build_writer_payload,
                 output_handler=self._handle_writer_output,
                 span_name="writer_agent",
@@ -243,23 +286,23 @@ class DataScientistPipeline(BasePipeline):
                 "Provide a comprehensive data science workflow"
             )
         )
-        self.conversation.set_query(query)
+        self.state.set_query(query)
 
         self.update_printer("research", "Executing research workflow...")
         self.start_time = time.time()
-        self.conversation.start_timer()
+        self.state.start_timer()
 
         # Execute the flow
-        await self.flow_runner.execute(self.pipeline_context)
+        await self.flow_runner.execute(self.context)
 
         # Finalise persisted memory and artefacts
         self.update_printer("research", "Research workflow complete", is_done=True)
         logger.info("Research workflow completed")
 
-        if self.conversation.final_report:
-            await self._finalise_research(self.conversation.final_report)
+        if self.state.final_report:
+            await self._finalise_research(self.state.final_report)
 
-        return self.conversation.final_report
+        return self.state.final_report
 
     # ------------------------------------------------------------------
     # Flow condition helpers
@@ -280,31 +323,31 @@ class DataScientistPipeline(BasePipeline):
     # Input builders
     # ------------------------------------------------------------------
     def _build_observation_payload(self, context: PipelineContext) -> Dict[str, Any]:
-        return self._observation_snapshot(context.state)
+        return context.snapshot("observe")
 
     def _build_evaluation_payload(self, context: PipelineContext) -> Dict[str, Any]:
-        return self._evaluation_snapshot(context.state)
+        return context.snapshot("evaluate")
 
     def _build_routing_payload(self, context: PipelineContext) -> Dict[str, Any]:
-        return self._routing_snapshot(context.state)
+        return context.snapshot("route")
 
     def _build_writer_payload(self, context: PipelineContext) -> Dict[str, Any]:
-        return self._writer_snapshot(context.state)
+        return context.snapshot("writer")
 
     # ------------------------------------------------------------------
     # Output handlers
     # ------------------------------------------------------------------
     def _handle_observation_output(self, context: PipelineContext, result: Any) -> None:
-        context.apply_output("observe_agent", result)
+        context.apply_output("observe", result)
 
     def _handle_evaluation_output(self, context: PipelineContext, result: KnowledgeGapOutput) -> None:
-        context.apply_output("evaluate_agent", result)
+        context.apply_output("evaluate", result)
 
     def _handle_routing_output(self, context: PipelineContext, result: AgentSelectionPlan) -> None:
-        context.apply_output("routing_agent", result)
+        context.apply_output("route", result)
 
     def _handle_writer_output(self, context: PipelineContext, result: Any) -> None:
-        context.apply_output("writer_agent", result)
+        context.apply_output("writer", result)
 
     # ------------------------------------------------------------------
     # Tool execution runner

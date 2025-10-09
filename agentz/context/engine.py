@@ -11,6 +11,43 @@ from agentz.context.conversation import ConversationState, IterationRecord, Tool
 Payload = Dict[str, Any]
 
 
+@dataclass(frozen=True)
+class BehaviorTemplate:
+    """Unified representation of a behavior profile and runtime template."""
+
+    key: str
+    profile: str
+    template: str
+    instructions: Optional[str] = None
+    params: Dict[str, Any] = field(default_factory=dict)
+
+
+class BehaviorProfiles:
+    """Collection of behavior templates to bootstrap the context engine."""
+
+    def __init__(self, *behaviors: BehaviorTemplate):
+        self._behaviors: Dict[str, BehaviorTemplate] = {}
+        for behavior in behaviors:
+            self.add(behavior)
+
+    def add(self, behavior: BehaviorTemplate) -> None:
+        if behavior.key in self._behaviors:
+            raise ValueError(f"Behavior '{behavior.key}' already registered in BehaviorProfiles.")
+        self._behaviors[behavior.key] = behavior
+
+    def __iter__(self):
+        return iter(self._behaviors.values())
+
+    def items(self):
+        return self._behaviors.items()
+
+    def get(self, key: str) -> BehaviorTemplate:
+        return self._behaviors[key]
+
+    def values(self):
+        return self._behaviors.values()
+
+
 class SnapshotBuilder(Protocol):
     """Callable protocol for building agent-specific snapshot payloads."""
 
@@ -121,11 +158,17 @@ class ContextEngine:
         state: ConversationState,
         *,
         templates: Optional[TemplateLibrary] = None,
+        behavior_profiles: Optional[BehaviorProfiles] = None,
     ) -> None:
         self._state = state
         self.templates = templates or TemplateLibrary()
         self.registry = ContextRegistry()
         self._state_hooks: Dict[str, StateHook] = {}
+        self._behaviors: Dict[str, BehaviorTemplate] = {}
+        self._agents: Dict[str, Any] = {}
+        if behavior_profiles:
+            for behavior in behavior_profiles:
+                self.register_behavior(behavior)
 
     @property
     def state(self) -> ConversationState:
@@ -164,6 +207,40 @@ class ContextEngine:
             self.templates.register_renderer(profile, template_name, template)
         else:
             self.templates.register_template(profile, template_name, template)
+
+    # ------------------------------------------------------------------
+    # Behavior and agent registry
+    # ------------------------------------------------------------------
+    def register_behavior(self, behavior: BehaviorTemplate) -> None:
+        self._behaviors[behavior.key] = behavior
+
+    def get_behavior(self, key: str) -> BehaviorTemplate:
+        try:
+            return self._behaviors[key]
+        except KeyError as exc:
+            raise KeyError(f"Behavior '{key}' is not registered.") from exc
+
+    def list_behaviors(self) -> Dict[str, BehaviorTemplate]:
+        return dict(self._behaviors)
+
+    def render_behavior(self, key: str, payload: Union[BaseModel, Mapping[str, Any], None] = None) -> str:
+        behavior = self.get_behavior(key)
+        return self.render_prompt(behavior.profile, behavior.template, payload)
+
+    def behavior_instructions(self, key: str) -> Optional[str]:
+        return self.get_behavior(key).instructions
+
+    def register_agent(self, key: str, agent: Any) -> None:
+        self._agents[key] = agent
+
+    def get_agent(self, key: str) -> Any:
+        try:
+            return self._agents[key]
+        except KeyError as exc:
+            raise KeyError(f"Agent '{key}' is not registered.") from exc
+
+    def list_agents(self) -> Dict[str, Any]:
+        return dict(self._agents)
 
     # ------------------------------------------------------------------
     # Snapshot + output registration

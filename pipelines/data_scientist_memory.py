@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from agentz.context.behavior_profiles import behavior_profiles
 from agentz.context.conversation import ConversationState
+from agentz.context.engine import BehaviorProfiles, BehaviorTemplate
 from agentz.agents.manager_agents.memory_agent import MemoryAgentOutput
 from agentz.agents.registry import create_agents
 from pipelines.data_scientist import DataScientistPipeline
@@ -13,12 +15,28 @@ from agentz.flow.runtime_objects import AgentCapability, PipelineContext
 class DataScientistMemoryPipeline(DataScientistPipeline):
     """Data scientist pipeline variant that maintains iterative memory compression."""
 
+    def _build_behavior_profiles(self) -> BehaviorProfiles:
+        profiles = super()._build_behavior_profiles()
+        profile = behavior_profiles.get("memory_agent")
+        profiles.add(
+            BehaviorTemplate(
+                key="memory",
+                profile="memory_agent",
+                template="compression_iteration",
+                instructions=profile.instructions,
+                params=dict(profile.params),
+            )
+        )
+        return profiles
+
     def __init__(self, config):
         # Initialise base pipeline (sets up conversation, agents, and runner)
         super().__init__(config)
 
         # Augment manager agents with memory agent
         self.agents["memory_agent"] = AgentCapability("memory_agent", create_agents("memory_agent", config))
+        self.behavior_agents["memory"] = "memory_agent"
+        self.engine.register_agent("memory", self.agents["memory_agent"])
 
         # Rebuild flow with memory node included
         self.iteration_flow = IterationFlow(
@@ -35,18 +53,6 @@ class DataScientistMemoryPipeline(DataScientistPipeline):
         self._register_memory_context_bindings()
 
     # ------------------------------------------------------------------
-    # Conversation helpers
-    # ------------------------------------------------------------------
-    def _build_observation_payload(self, context: PipelineContext) -> Dict[str, Any]:
-        return self._observation_snapshot(context.state)
-
-    def _build_evaluation_payload(self, context: PipelineContext) -> Dict[str, Any]:
-        return self._evaluation_snapshot(context.state)
-
-    def _build_routing_payload(self, context: PipelineContext) -> Dict[str, Any]:
-        return self._routing_snapshot(context.state)
-
-    # ------------------------------------------------------------------
     # Flow configuration with memory node
     # ------------------------------------------------------------------
     def _build_iteration_nodes(self) -> List[FlowNode]:
@@ -55,8 +61,7 @@ class DataScientistMemoryPipeline(DataScientistPipeline):
             FlowNode(
                 name="memory",
                 agent_key="memory_agent",
-                profile="memory_agent",
-                template="compression_iteration",
+                behavior="memory",
                 input_builder=self._build_memory_payload,
                 output_model=MemoryAgentOutput,
                 output_handler=self._handle_memory_output,
@@ -70,10 +75,10 @@ class DataScientistMemoryPipeline(DataScientistPipeline):
         return nodes
 
     def _build_memory_payload(self, context: PipelineContext) -> Dict[str, Any]:
-        return self._memory_snapshot(context.state)
+        return context.snapshot("memory")
 
     def _handle_memory_output(self, context: PipelineContext, result: MemoryAgentOutput) -> None:
-        context.apply_output("memory_agent", result)
+        context.apply_output("memory", result)
 
     def _should_run_memory_node(self, context: PipelineContext) -> bool:
         state = context.state
@@ -82,9 +87,12 @@ class DataScientistMemoryPipeline(DataScientistPipeline):
         return bool(state.unsummarized_history())
 
     def _register_memory_context_bindings(self) -> None:
-        ctx = self.pipeline_context
-        ctx.register_snapshot("memory_agent", self._memory_snapshot)
-        ctx.register_output_handler("memory_agent", self._apply_memory_output)
+        engine = self.engine
+        engine.register_snapshot("observe", self._observation_snapshot)
+        engine.register_snapshot("evaluate", self._evaluation_snapshot)
+        engine.register_snapshot("route", self._routing_snapshot)
+        engine.register_snapshot("memory", self._memory_snapshot)
+        engine.register_output_handler("memory", self._apply_memory_output)
 
     def _observation_snapshot(self, state: ConversationState) -> Dict[str, Any]:
         history = state.history_with_summary()

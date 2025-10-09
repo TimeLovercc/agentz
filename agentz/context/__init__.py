@@ -1,5 +1,5 @@
 """Context engine for managing prompt templates and structured conversation state."""
 
-from .engine import ContextEngine, TemplateLibrary
+from .engine import BehaviorProfiles, BehaviorTemplate, ContextEngine, TemplateLibrary
 
-__all__ = ["ContextEngine", "TemplateLibrary"]
+__all__ = ["BehaviorProfiles", "BehaviorTemplate", "ContextEngine", "TemplateLibrary"]

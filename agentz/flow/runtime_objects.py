@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 
 from pydantic import BaseModel
 
-from agentz.context.engine import ContextEngine
+from agentz.context.engine import BehaviorProfiles, ContextEngine
 from agentz.context.conversation import ConversationState
 
 
@@ -43,10 +43,18 @@ class PipelineContext:
     def __init__(
         self,
         state: ConversationState,
+        behavior_profiles: Optional[BehaviorProfiles] = None,
         *,
         engine: Optional[ContextEngine] = None,
     ):
-        self._engine = engine or ContextEngine(state)
+        if engine is None:
+            self._engine = ContextEngine(state, behavior_profiles=behavior_profiles)
+        else:
+            self._engine = engine
+            if behavior_profiles:
+                for behavior in behavior_profiles:
+                    self._engine.register_behavior(behavior)
+        self.behavior_profiles = behavior_profiles
 
     @property
     def engine(self) -> ContextEngine:
@@ -58,6 +66,9 @@ class PipelineContext:
 
     def render_prompt(self, profile: str, template: str, payload: Dict[str, Any]) -> str:
         return self._engine.render_prompt(profile, template, payload)
+
+    def render_behavior(self, behavior_key: str, payload: Dict[str, Any]) -> str:
+        return self._engine.render_behavior(behavior_key, payload)
 
     def build_prompt(
         self,
@@ -79,6 +90,21 @@ class PipelineContext:
 
     def register_output_handler(self, agent_key: str, handler) -> None:
         self._engine.register_output_handler(agent_key, handler)
+
+    def register_behavior(self, behavior) -> None:
+        self._engine.register_behavior(behavior)
+
+    def get_behavior(self, behavior_key: str):
+        return self._engine.get_behavior(behavior_key)
+
+    def behavior_instructions(self, behavior_key: str) -> Optional[str]:
+        return self._engine.behavior_instructions(behavior_key)
+
+    def register_agent(self, behavior_key: str, agent: Any) -> None:
+        self._engine.register_agent(behavior_key, agent)
+
+    def get_registered_agent(self, behavior_key: str) -> Any:
+        return self._engine.get_agent(behavior_key)
 
     def snapshot(self, agent_key: str) -> Dict[str, Any]:
         return self._engine.snapshot(agent_key)
