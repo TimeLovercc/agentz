@@ -6,23 +6,44 @@ from agentz.agents.registry import create_agents
 from agentz.flow import auto_trace
 from agentz.memory.behavior_profiles import runtime_prompts
 from pipelines.base import BasePipeline
-from agentz.agents.registry import register_agent, ToolAgentOutput
-from agentz.configuration.base import BaseConfig
-from agentz.llm.llm_setup import model_supports_json_and_tool_calls
-from agentz.utils import create_type_parser
 from agentz.agents.base import ResearchAgent as Agent
-from agents.mcp import MCPServer, MCPServerStdio, MCPServerSse
+from agentz.mcp.manager import MCPManager, MCPServerSpec
+from agentz.mcp.patches import apply_browsermcp_close_patch
 
 
-async def get_browser_server():
-    async with MCPServerStdio(
-        name = "Browser",
-        params = {
-            "command": "npx",
-            "args": ["-y", "@browsermcp/mcp@latest"]
-        }
-    ) as server:
-        return server
+class NullReporter:
+    """No-op reporter to disable report generation for this pipeline."""
+
+    def start(self, *_args, **_kwargs):  # noqa: D401 - intentionally blank
+        return None
+
+    def set_final_result(self, _result):  # noqa: D401 - intentionally blank
+        return None
+
+    def finalize(self):  # noqa: D401 - intentionally blank
+        return None
+
+    def print_terminal_report(self):  # noqa: D401 - intentionally blank
+        return None
+
+    def record_status_update(self, **_kwargs):  # noqa: D401 - intentionally blank
+        return None
+
+    def record_panel(self, **_kwargs):  # noqa: D401 - intentionally blank
+        return None
+
+    def record_group_start(self, **_kwargs):  # noqa: D401 - intentionally blank
+        return None
+
+    def record_group_end(self, **_kwargs):  # noqa: D401 - intentionally blank
+        return None
+
+    def record_agent_step_start(self, **_kwargs):  # noqa: D401 - intentionally blank
+        return None
+
+    def record_agent_step_end(self, **_kwargs):  # noqa: D401 - intentionally blank
+        return None
+
 
 class SimpleBrowserPipeline(BasePipeline):
     """Simple two-agent pipeline: routing agent + single tool agent."""
@@ -30,25 +51,37 @@ class SimpleBrowserPipeline(BasePipeline):
     def __init__(self, config):
         super().__init__(config)
 
+        # Ensure Browser MCP stdio server has patched close handler to avoid recursion errors.
+        apply_browsermcp_close_patch()
+
+        # Disable report generation for this pipeline
+        self.reporter = NullReporter()
+
         # Setup routing agent
         self.routing_agent = create_agents("routing_agent", config)
 
         # Setup single tool agent
         self.tool_agent = None
+        mcp_config = getattr(self.config, "mcp", None)
+        self.mcp_manager = MCPManager.from_config(mcp_config)
+        self.mcp_manager.ensure_server(
+            "browser",
+            MCPServerSpec(
+                type="stdio",
+                options={
+                    "name": "Browser",
+                    "params": {"command": "npx", "args": ["-y", "@browsermcp/mcp@latest"]},
+                },
+            ),
+        )
 
     @auto_trace
     async def run(self):
         """Run the simple pipeline with single-pass execution to validate the browser agent."""
         logger.info(f"User prompt: {self.config.prompt}")
 
-        async with MCPServerStdio(
-            name = "Browser",
-            params = {
-                "command": "npx",
-                "args": ["@browsermcp/mcp@latest"]
-            }
-        ) as server:
-        # await server.connect()
+        async with self.mcp_manager.session() as mcp_session:
+            server = await mcp_session.get_server("browser")
             self.tool_agent = Agent(
                 name="Browser",
                 instructions=f"""
