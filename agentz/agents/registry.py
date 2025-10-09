@@ -63,13 +63,21 @@ def _ensure_registry_populated(agent_name_hint: Optional[str] = None) -> None:
             f"agentz.agents.{leaf}",
             f"agentz.agents.{leaf}_agent",
             f"agentz.agents.manager_agents.{leaf}",
+<<<<<<< HEAD
             f"agentz.agents.worker_agents.{leaf}",
+=======
+            f"agentz.agents.data_agents.{leaf}",
+            f"agentz.agents.mcp_agents.{leaf}",
+>>>>>>> dev
         ):
             _try_import_module(mod)
 
         # Check if we found it
         if ALL_AGENT_FACTORIES.get(leaf):
+<<<<<<< HEAD
             logger.debug(f"Found agent '{leaf}' via convention-based import")
+=======
+>>>>>>> dev
             return
 
     # 2) Full recursive import under agentz.agents (one-time)
@@ -559,7 +567,10 @@ def create_agents(
         if store:
             path = f"{group}.{agent_name}" if group else agent_name
             store.add(path, agent, replace=True)
+<<<<<<< HEAD
             logger.debug(f"Auto-registered agent at '{path}'")
+=======
+>>>>>>> dev
 
         return agent
 
@@ -569,17 +580,30 @@ def create_agents(
             out: Dict[str, Any] = {}
             for name in names_or_map:
                 out[name] = await _build_one_async(name, config)
+<<<<<<< HEAD
                 logger.info(f"Created agent: {name}")
+=======
+>>>>>>> dev
             return out
 
         agents = _sync_run(_build_many())
 
+<<<<<<< HEAD
+=======
+        # Log summary
+        agent_list = ", ".join(names_or_map)
+        logger.info(f"Created {len(names_or_map)} agents: {agent_list}")
+
+>>>>>>> dev
         # Auto-register if store available
         if store:
             for name, agent in agents.items():
                 path = f"{group}.{name}" if group else name
                 store.add(path, agent, replace=True)
+<<<<<<< HEAD
                 logger.debug(f"Auto-registered agent at '{path}'")
+=======
+>>>>>>> dev
 
         return agents
 
@@ -601,13 +625,23 @@ def create_agents(
                 raise TypeError(f"Unsupported agent value type for '{name}': {type(value)}")
 
             result[name] = agent
+<<<<<<< HEAD
             logger.info(f"Created agent: {name}")
+=======
+>>>>>>> dev
 
             # Auto-register if store available
             if store:
                 path = f"{group}.{name}" if group else name
                 store.add(path, agent, replace=True)
+<<<<<<< HEAD
                 logger.debug(f"Auto-registered agent at '{path}'")
+=======
+
+        # Log summary
+        agent_list = ", ".join(names_or_map.keys())
+        logger.info(f"Created {len(names_or_map)} agents: {agent_list}")
+>>>>>>> dev
 
         return result
 

@@ -1,5 +1,9 @@
+<<<<<<< HEAD
 from typing import Dict, Any, Optional
 import os
+=======
+from typing import Dict, Any, Optional, Union
+>>>>>>> dev
 
 from agents import (
     OpenAIChatCompletionsModel,
@@ -142,3 +146,16 @@ class LLMConfig:
                 base_url=base_url,
             )
             return model_class(model=self.model_name, openai_client=client)
+
+def get_base_url(model: Union[OpenAIChatCompletionsModel, OpenAIResponsesModel]) -> str:
+    """Utility function to get the base URL for a given model"""
+    return str(model._client._base_url)
+
+def model_supports_json_and_tool_calls(
+    model: Union[OpenAIChatCompletionsModel, OpenAIResponsesModel],
+) -> bool:
+    """Utility function to check if a model supports structured output"""
+    structured_output_providers = ["openai.com", "anthropic.com"]
+    return any(
+        provider in get_base_url(model) for provider in structured_output_providers
+    )

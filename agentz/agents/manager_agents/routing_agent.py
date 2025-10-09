@@ -2,11 +2,17 @@ from __future__ import annotations
 
 from typing import List, Optional
 from pydantic import BaseModel, Field
-from loguru import logger
 
+<<<<<<< HEAD
 from agents import Agent
 from agentz.configuration.base import BaseConfig, get_agent_spec
 from agentz.agents.registry import register_agent
+=======
+from agentz.agents.base import ResearchAgent as Agent
+from agentz.configuration.base import BaseConfig, get_agent_spec
+from agentz.agents.registry import register_agent
+from agentz.memory.behavior_profiles import behavior_profiles
+>>>>>>> dev
 
 
 class AgentTask(BaseModel):
@@ -34,14 +40,49 @@ def create_routing_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
     Returns:
         Agent instance configured for task routing
     """
+<<<<<<< HEAD
     if spec is None:
         spec = get_agent_spec(cfg, "routing_agent")
 
     instructions = spec["instructions"]
     params = spec.get("params", {})
+=======
+    def _merge_spec(input_spec: Optional[dict]) -> dict:
+        if input_spec is None:
+            return get_agent_spec(cfg, "routing_agent")
 
-    agent = Agent(
+        merged = dict(input_spec)
+        profile_name = merged.get("profile") or "routing_agent"
+        profile = behavior_profiles.get_optional(profile_name)
+
+        params_override = merged.get("params")
+        if profile:
+            merged.setdefault("instructions", profile.instructions)
+            params_override = profile.params_with(params_override)
+            merged["profile"] = profile.name
+        else:
+            params_override = dict(params_override or {})
+>>>>>>> dev
+
+        if "instructions" not in merged:
+            fallback = get_agent_spec(cfg, "routing_agent", required=False)
+            if fallback:
+                merged["instructions"] = fallback["instructions"]
+                base_params = dict(fallback.get("params", {}))
+                base_params.update(params_override)
+                params_override = base_params
+
+        if "instructions" not in merged:
+            raise ValueError("Routing agent requires instructions via profile or config.")
+
+        merged["params"] = params_override
+        return merged
+
+    spec = _merge_spec(spec)
+
+    return Agent(
         name="Task Router",
+<<<<<<< HEAD
         instructions=instructions,
         output_type=AgentSelectionPlan,
         model=cfg.llm.main_model,
@@ -50,3 +91,10 @@ def create_routing_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
 
     logger.info("Created RoutingAgent")
     return agent
+=======
+        instructions=spec["instructions"],
+        output_type=AgentSelectionPlan,
+        model=cfg.llm.main_model,
+        **spec.get("params", {})
+    )
+>>>>>>> dev

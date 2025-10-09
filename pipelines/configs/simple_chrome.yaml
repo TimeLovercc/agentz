@@ -1,0 +1,22 @@
+# Simple Pipeline Configuration - Two Agent Pipeline
+
+# Provider configuration
+provider: "gemini"
+model: "gemini-2.5-flash"
+api_key: "${GEMINI_API_KEY}"
+
+
+prompt: |
+  Open www.google.com and search for "openai agents sdk". Return the title of the first result.
+
+# Pipeline settings
+pipeline:
+  verbose: true
+
+# Agent profiles
+agents:
+  routing_agent:
+    profile: routing_agent_simple_chrome
+      
+  chrome_agent:
+    profile: chrome_agent

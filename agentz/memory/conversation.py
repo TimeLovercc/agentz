@@ -1,109 +1,166 @@
+from __future__ import annotations
+
+import time
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-
-class IterationData(BaseModel):
-    """Data for a single iteration of the research loop."""
-    gap: str = Field(description="The gap addressed in the iteration", default_factory=list)
-    tool_calls: List[str] = Field(description="The tool calls made", default_factory=list)
-    findings: List[str] = Field(description="The findings collected from tool calls", default_factory=list)
-    thought: List[str] = Field(description="The thinking done to reflect on the success of the iteration and next steps", default_factory=list)
+from agentz.agents.manager_agents.evaluate_agent import KnowledgeGapOutput
+from agentz.agents.manager_agents.routing_agent import AgentSelectionPlan, AgentTask
+from agentz.agents.registry import ToolAgentOutput
 
 
-class Conversation(BaseModel):
-    """A conversation between the user and the iterative researcher."""
-    history: List[IterationData] = Field(description="The data for each iteration of the research loop", default_factory=list)
+class ToolExecutionResult(BaseModel):
+    """Structured record of a tool execution within an iteration."""
 
-    def add_iteration(self, iteration_data: Optional[IterationData] = None):
-        if iteration_data is None:
-            iteration_data = IterationData()
-        self.history.append(iteration_data)
+    task: AgentTask
+    output: ToolAgentOutput
 
-    def set_latest_gap(self, gap: str):
-        self.history[-1].gap = gap
+    def as_history_block(self) -> str:
+        parts = [
+            f"[Tool] {self.task.agent}",
+            f"[Query] {self.task.query}",
+        ]
+        if self.task.entity_website:
+            parts.append(f"[Entity] {self.task.entity_website}")
+        detail = "\n".join(parts)
+        output = self.output.output if hasattr(self.output, "output") else ""
+        return f"{detail}\n\n{output}".strip()
 
-    def set_latest_tool_calls(self, tool_calls: List[str]):
-        self.history[-1].tool_calls = tool_calls
 
-    def set_latest_findings(self, findings: List[str]):
-        self.history[-1].findings = findings
+class IterationRecord(BaseModel):
+    """State captured for a single iteration of the research loop."""
 
-    def set_latest_thought(self, thought: str):
-        self.history[-1].thought = thought
+    index: int
+    observation: Optional[str] = None
+    evaluation: Optional[KnowledgeGapOutput] = None
+    selected_gap: Optional[str] = None
+    route_plan: Optional[AgentSelectionPlan] = None
+    tools: List[ToolExecutionResult] = Field(default_factory=list)
+    findings: List[str] = Field(default_factory=list)
+    status: str = Field(default="pending", description="Iteration status: pending or complete")
+    summarized: bool = Field(default=False, description="Whether this iteration has been summarised")
 
-    def get_latest_gap(self) -> str:
-        return self.history[-1].gap
+    def mark_complete(self) -> None:
+        self.status = "complete"
 
-    def get_latest_tool_calls(self) -> List[str]:
-        return self.history[-1].tool_calls
+    def is_complete(self) -> bool:
+        return self.status == "complete"
 
-    def get_latest_findings(self) -> List[str]:
-        return self.history[-1].findings
+    def mark_summarized(self) -> None:
+        self.summarized = True
 
-    def get_latest_thought(self) -> str:
-        return self.history[-1].thought
+    def history_block(self) -> str:
+        """Render this iteration as a formatted history block for prompts."""
+        lines: List[str] = [f"[ITERATION {self.index}]"]
 
-    def get_all_findings(self) -> List[str]:
-        return [finding for iteration_data in self.history for finding in iteration_data.findings]
+        if self.observation:
+            lines.append(f"<thought>\n{self.observation}\n</thought>")
 
-    def compile_conversation_history(self) -> str:
-        """Compile the conversation history into a string."""
-        conversation = ""
-        for iteration_num, iteration_data in enumerate(self.history):
-            conversation += f"[ITERATION {iteration_num + 1}]\n\n"
-            if iteration_data.thought:
-                conversation += f"{self.get_thought_string(iteration_num)}\n\n"
-            if iteration_data.gap:
-                conversation += f"{self.get_task_string(iteration_num)}\n\n"
-            if iteration_data.tool_calls:
-                conversation += f"{self.get_action_string(iteration_num)}\n\n"
-            if iteration_data.findings:
-                conversation += f"{self.get_findings_string(iteration_num)}\n\n"
+        if self.selected_gap:
+            lines.append(f"<task>\nAddress this knowledge gap: {self.selected_gap}\n</task>")
 
-        return conversation
-
-    def get_task_string(self, iteration_num: int) -> str:
-        """Get the task for the current iteration."""
-        if self.history[iteration_num].gap:
-            return f"<task>\nAddress this knowledge gap: {self.history[iteration_num].gap}\n</task>"
-        return ""
-
-    def get_action_string(self, iteration_num: int) -> str:
-        """Get the action for the current iteration."""
-        if self.history[iteration_num].tool_calls:
-            joined_calls = '\n'.join(self.history[iteration_num].tool_calls)
-            return (
+        if self.route_plan and self.route_plan.tasks:
+            task_lines = []
+            for task in self.route_plan.tasks:
+                entity = task.entity_website or "null"
+                task_lines.append(f"[Agent] {task.agent} [Query] {task.query} [Entity] {entity}")
+            lines.append(
                 "<action>\nCalling the following tools to address the knowledge gap:\n"
-                f"{joined_calls}\n</action>"
+                + "\n".join(task_lines)
+                + "\n</action>"
             )
-        return ""
 
-    def get_findings_string(self, iteration_num: int) -> str:
-        """Get the findings for the current iteration."""
-        if self.history[iteration_num].findings:
-            joined_findings = '\n\n'.join(self.history[iteration_num].findings)
-            return f"<findings>\n{joined_findings}\n</findings>"
-        return ""
+        if self.tools:
+            findings_text = "\n\n".join(result.as_history_block() for result in self.tools)
+            lines.append(f"<findings>\n{findings_text}\n</findings>")
+        elif self.findings:
+            findings_text = "\n\n".join(self.findings)
+            lines.append(f"<findings>\n{findings_text}\n</findings>")
 
-    def get_thought_string(self, iteration_num: int) -> str:
-        """Get the thought for the current iteration."""
-        if self.history[iteration_num].thought:
-            return f"<thought>\n{self.history[iteration_num].thought}\n</thought>"
-        return ""
+        return "\n\n".join(lines).strip()
 
-    def latest_task_string(self) -> str:
-        """Get the latest task."""
-        return self.get_task_string(len(self.history) - 1)
 
-    def latest_action_string(self) -> str:
-        """Get the latest action."""
-        return self.get_action_string(len(self.history) - 1)
+class ConversationState(BaseModel):
+    """Centralised storage for all iteration data shared across agents."""
 
-    def latest_findings_string(self) -> str:
-        """Get the latest findings."""
-        return self.get_findings_string(len(self.history) - 1)
+    query: str = ""
+    data_path: Optional[str] = None
+    max_iterations: int = 5
+    max_minutes: float = 10.0
 
-    def latest_thought_string(self) -> str:
-        """Get the latest thought."""
-        return self.get_thought_string(len(self.history) - 1)
+    iterations: List[IterationRecord] = Field(default_factory=list)
+    final_report: Optional[str] = None
+    started_at: Optional[float] = None
+    complete: bool = False
+    summary: Optional[str] = None
+
+    def set_query(self, query: str) -> None:
+        self.query = query
+
+    def start_timer(self) -> None:
+        self.started_at = time.time()
+
+    def elapsed_minutes(self) -> float:
+        if self.started_at is None:
+            return 0.0
+        return (time.time() - self.started_at) / 60
+
+    def begin_iteration(self) -> IterationRecord:
+        iteration = IterationRecord(index=len(self.iterations) + 1)
+        self.iterations.append(iteration)
+        return iteration
+
+    @property
+    def current_iteration(self) -> IterationRecord:
+        if not self.iterations:
+            raise ValueError("No iteration has been started yet.")
+        return self.iterations[-1]
+
+    def mark_iteration_complete(self) -> None:
+        self.current_iteration.mark_complete()
+
+    def mark_research_complete(self) -> None:
+        self.complete = True
+        self.current_iteration.mark_complete()
+
+    def iteration_history(self, include_current: bool = False) -> str:
+        relevant = [
+            iteration
+            for iteration in self.iterations
+            if iteration.is_complete() or include_current and iteration is self.current_iteration
+        ]
+        blocks = [iteration.history_block() for iteration in relevant if iteration.history_block()]
+        return "\n\n".join(blocks).strip()
+
+    def unsummarized_history(self, include_current: bool = True) -> str:
+        relevant = [
+            iteration
+            for iteration in self.iterations
+            if (iteration.is_complete() or include_current and iteration is self.current_iteration)
+            and not iteration.summarized
+        ]
+        blocks = [iteration.history_block() for iteration in relevant if iteration.history_block()]
+        return "\n\n".join(blocks).strip()
+
+    def history_with_summary(self) -> str:
+        summary_section = ""
+        if self.summary:
+            summary_section = f"[SUMMARY BEFORE NEW ITERATION]\n\n{self.summary}\n\n"
+        return summary_section + self.unsummarized_history()
+
+    def all_findings(self) -> List[str]:
+        findings: List[str] = []
+        for iteration in self.iterations:
+            findings.extend(iteration.findings)
+            findings.extend(result.output.output for result in iteration.tools if hasattr(result.output, "output"))
+        return findings
+
+    def findings_text(self) -> str:
+        findings = self.all_findings()
+        return "\n\n".join(findings).strip() if findings else ""
+
+    def update_summary(self, summary: str) -> None:
+        self.summary = summary
+        for iteration in self.iterations:
+            iteration.mark_summarized()

@@ -7,20 +7,23 @@ api_key: "${GEMINI_API_KEY}"  # Loads from environment variable
 
 # Dataset defaults
 data:
-  path: "/Users/zhimeng/workspaces/agentz/data/banana_quality.csv"
+  path: "data/banana_quality.csv"
   prompt: |
-    Build a model to classify banana quality as good or bad based on their information. We have uploaded the entire dataset for you here in the banana_quality.csv file.
+    Build a model to classify banana quality as good or bad based on their numerical
+    information about bananas of different quality (size, weight, sweetness, softness,
+    harvest time, ripeness, and acidity). We have uploaded the entire dataset for you
+    here in the banana_quality.csv file.
 
 # Pipeline settings
 pipeline:
-  max_iterations: 3
-  max_time_minutes: 3
+  max_iterations: 5
+  max_time_minutes: 10
   verbose: true
-  reporter:
-    preset: minimal
 
 # Agent profiles
 agents:
+  memory_agent:
+    profile: memory_agent
   routing_agent:
     profile: routing_agent
   observe_agent:

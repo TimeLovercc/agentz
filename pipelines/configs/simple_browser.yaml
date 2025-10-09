@@ -1,0 +1,24 @@
+# Simple Pipeline Configuration - Two Agent Pipeline
+
+# Provider configuration
+provider: "gemini"
+model: "gemini-2.5-flash"
+api_key: "${GEMINI_API_KEY}"
+
+
+prompt: |
+  - Open google.com
+  - Search for which LPL team loses to Vietnam in Bo3
+  - Return the name of that team
+
+# Pipeline settings
+pipeline:
+  verbose: true
+
+# Agent profiles
+agents:
+  routing_agent:
+    profile: routing_agent_simple_browser
+      
+  browser_agent:
+    profile: browser_agent

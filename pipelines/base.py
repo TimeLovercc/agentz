@@ -1,134 +1,22 @@
 import asyncio
 import time
-from contextlib import contextmanager, nullcontext
-from functools import wraps
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Union
 
 from loguru import logger
 from rich.console import Console
 
-from agents import Runner
-from agents.tracing.create import agent_span, function_span, trace
+from agents.tracing.create import function_span
 from agentz.agents.registry import AgentStore, set_current_pipeline_store
 from agentz.configuration.base import BaseConfig, resolve_config
-from agentz.memory.conversation import Conversation
+from agentz.flow import (
+    AgentExecutor,
+    ExecutionContext,
+)
+from agentz.reporting import RunReporter
 from agentz.utils import Printer, get_experiment_timestamp
 from pydantic import BaseModel
-
-
-def with_run_context(additional_logging: Optional[Callable] = None):
-    """Decorator that wraps async run method with automatic context management.
-
-    Handles:
-    - Initialization via _initialize_run()
-    - Trace context lifecycle
-    - Printer cleanup via _stop_printer()
-    - Auto-finalization if method returns a research report
-
-    Args:
-        additional_logging: Optional callable for pipeline-specific logging
-    """
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(self, *args, **kwargs):
-            trace_ctx = self._initialize_run(additional_logging)
-            try:
-                with trace_ctx:
-                    result = await func(self, *args, **kwargs)
-                    # Auto-finalize if result looks like a research report
-                    if result and isinstance(result, str) and hasattr(self, '_finalise_research'):
-                        await self._finalise_research(result)
-                    return result
-            finally:
-                self._stop_printer()
-        return wrapper
-
-    # Support both @with_run_context and @with_run_context()
-    if callable(additional_logging):
-        func = additional_logging
-        additional_logging = None
-        return decorator(func)
-    return decorator
-
-
-def with_span_step(
-    step_key: str,
-    span_name: str,
-    span_type: str = "function",
-    start_message: Optional[str] = None,
-    done_message: Optional[str] = None,
-    **span_kwargs
-):
-    """Decorator that wraps a function/coroutine with span context and printer updates.
-
-    Args:
-        step_key: Printer status key
-        span_name: Name for the span
-        span_type: Type of span - "agent" or "function"
-        start_message: Optional start message for printer
-        done_message: Optional completion message for printer
-        **span_kwargs: Additional kwargs for span (e.g., tools, input)
-    """
-    def decorator(func):
-        @wraps(func)
-        async def async_wrapper(self, *args, **kwargs):
-            span_factory = agent_span if span_type == "agent" else function_span
-
-            if start_message:
-                self.update_printer(step_key, start_message)
-
-            with self.span_context(span_factory, name=span_name, **span_kwargs) as span:
-                result = await func(self, *args, **kwargs)
-
-                # Set span output if available
-                if span and hasattr(span, "set_output"):
-                    if isinstance(result, dict):
-                        span.set_output(result)
-                    elif isinstance(result, str):
-                        span.set_output({"output_preview": result[:200]})
-                    elif hasattr(result, "model_dump"):
-                        span.set_output(result.model_dump())
-                    else:
-                        span.set_output({"result": str(result)[:200]})
-
-                if done_message:
-                    self.update_printer(step_key, done_message, is_done=True)
-
-                return result
-
-        @wraps(func)
-        def sync_wrapper(self, *args, **kwargs):
-            span_factory = agent_span if span_type == "agent" else function_span
-
-            if start_message:
-                self.update_printer(step_key, start_message)
-
-            with self.span_context(span_factory, name=span_name, **span_kwargs) as span:
-                result = func(self, *args, **kwargs)
-
-                # Set span output if available
-                if span and hasattr(span, "set_output"):
-                    if isinstance(result, dict):
-                        span.set_output(result)
-                    elif isinstance(result, str):
-                        span.set_output({"output_preview": result[:200]})
-                    elif hasattr(result, "model_dump"):
-                        span.set_output(result.model_dump())
-                    else:
-                        span.set_output({"result": str(result)[:200]})
-
-                if done_message:
-                    self.update_printer(step_key, done_message, is_done=True)
-
-                return result
-
-        # Return appropriate wrapper based on whether func is async
-        if asyncio.iscoroutinefunction(func):
-            return async_wrapper
-        return sync_wrapper
-
-    return decorator
 
 
 class BasePipeline:
@@ -164,6 +52,7 @@ class BasePipeline:
         """
         self.console = Console()
         self._printer: Optional[Printer] = None
+        self.reporter: Optional[RunReporter] = None
 
         # Resolve configuration using the new unified API
         self.config = resolve_config(config)
@@ -179,6 +68,12 @@ class BasePipeline:
         self.experiment_id = get_experiment_timestamp()
 
         pipeline_settings = self.config.pipeline
+        default_slug = self.__class__.__name__.replace("Pipeline", "").lower()
+        self.pipeline_slug = (
+            pipeline_settings.get("slug")
+            or pipeline_settings.get("name")
+            or default_slug
+        )
         self.workflow_name = (
             pipeline_settings.get("workflow_name")
             or pipeline_settings.get("name")
@@ -201,7 +96,6 @@ class BasePipeline:
         # Iterative pipeline state
         self.iteration = 0
         self.start_time: Optional[float] = None
-        self.conversation = Conversation()
         self.should_continue = True
         self.constraint_reason = ""
 
@@ -216,6 +110,10 @@ class BasePipeline:
             f"tracing: {enable_tracing}, sensitive_data: {trace_sensitive}"
         )
 
+        # Initialize execution context and executor (from flow module)
+        self._execution_context: Optional[ExecutionContext] = None
+        self._executor: Optional[AgentExecutor] = None
+
     @property
     def provider_name(self) -> str:
         return self.config.provider
@@ -223,6 +121,40 @@ class BasePipeline:
     @property
     def printer(self) -> Optional[Printer]:
         return self._printer
+
+    @property
+    def execution_context(self) -> ExecutionContext:
+        """Get or create the execution context."""
+        if self._execution_context is None:
+            enable_tracing = self.config.pipeline.get("enable_tracing", True)
+            trace_sensitive = self.config.pipeline.get("trace_include_sensitive_data", False)
+            self._execution_context = ExecutionContext(
+                printer=self.printer,
+                enable_tracing=enable_tracing,
+                trace_sensitive=trace_sensitive,
+                iteration=self.iteration,
+                experiment_id=self.experiment_id,
+                reporter=self.reporter,
+            )
+        else:
+            # Update iteration in existing context
+            self._execution_context.iteration = self.iteration
+            self._execution_context.printer = self.printer
+            self._execution_context.reporter = self.reporter
+        return self._execution_context
+
+    @property
+    def executor(self) -> AgentExecutor:
+        """Get or create the agent executor."""
+        # Refresh execution context so iteration/printer stay in sync across loops
+        context = self.execution_context
+
+        if self._executor is None:
+            self._executor = AgentExecutor(context)
+        else:
+            # Executor holds a reference to the context; update it in case it changed
+            self._executor.context = context
+        return self._executor
 
     def start_printer(self) -> Printer:
         if self._printer is None:
@@ -243,6 +175,9 @@ class BasePipeline:
         """Stop the live printer if it's currently active."""
         if self.printer is not None:
             self.stop_printer()
+        if self.reporter is not None:
+            self.reporter.finalize()
+            self.reporter.print_terminal_report()
 
     def _initialize_run(self, additional_logging=None):
         """Initialize a pipeline run with logging, printer, and tracing.
@@ -265,6 +200,17 @@ class BasePipeline:
         # Provider and model logging
         provider = self.provider_name
         logger.info(f"Provider: {provider}, Model: {self.config.llm.model_name}")
+
+        outputs_dir = Path(self.config.pipeline.get("outputs_dir", "outputs"))
+        if self.reporter is None:
+            self.reporter = RunReporter(
+                base_dir=outputs_dir,
+                pipeline_slug=self.pipeline_slug,
+                workflow_name=self.workflow_name,
+                experiment_id=self.experiment_id,
+                console=self.console,
+            )
+        self.reporter.start(self.config)
 
         # Start printer and update workflow
         self._start_printer()
@@ -309,16 +255,12 @@ class BasePipeline:
             self.console.print(f"🤖 Model: {self.config.llm.model_name}")
 
     def trace_context(self, name: str, metadata: Optional[Dict[str, Any]] = None):
-        enable_tracing = self.config.pipeline.get("enable_tracing", True)
-        if enable_tracing:
-            return trace(name, metadata=metadata)
-        return nullcontext()
+        """Create a trace context - delegates to ExecutionContext."""
+        return self.execution_context.trace_context(name, metadata=metadata)
 
     def span_context(self, span_factory, **kwargs):
-        enable_tracing = self.config.pipeline.get("enable_tracing", True)
-        if enable_tracing:
-            return span_factory(**kwargs)
-        return nullcontext()
+        """Create a span context - delegates to ExecutionContext."""
+        return self.execution_context.span_context(span_factory, **kwargs)
 
     async def agent_step(
         self,
@@ -330,9 +272,13 @@ class BasePipeline:
         sync: bool = False,
         printer_key: Optional[str] = None,
         printer_title: Optional[str] = None,
+        printer_group_id: Optional[str] = None,
+        printer_border_style: Optional[str] = None,
         **span_kwargs
     ) -> Any:
         """Run an agent with span tracking and optional output parsing.
+
+        This method delegates to AgentExecutor from the flow module.
 
         Args:
             agent: The agent to run
@@ -343,68 +289,103 @@ class BasePipeline:
             sync: Whether to run synchronously
             printer_key: Optional key for printer updates (will be prefixed with iter:N:)
             printer_title: Optional title for printer display
+            printer_group_id: Optional group to nest this item in
+            printer_border_style: Optional border color
             **span_kwargs: Additional kwargs for span (e.g., tools, input)
 
         Returns:
             Parsed output if output_model provided, otherwise Runner result
         """
-        span_factory = agent_span if span_type == "agent" else function_span
-
-        with self.span_context(span_factory, name=span_name, **span_kwargs) as span:
-            if sync:
-                result = Runner.run_sync(agent, instructions)
-            else:
-                result = await Runner.run(agent, instructions)
-
-            raw_output = getattr(result, "final_output", result)
-
-            # Print output preview if printer_key is provided
-            if printer_key and self.printer:
-                full_key = f"iter:{self.iteration}:{printer_key}"
-                preview = str(raw_output)
-                if len(preview) > 600:
-                    preview = preview[:600] + "..."
-
-                title = printer_title or printer_key
-                message = f"{title}: {preview}"
-                self.printer.update_item(full_key, message, is_done=True)
-
-            if output_model:
-                if isinstance(raw_output, output_model):
-                    output = raw_output
-                elif isinstance(raw_output, BaseModel):
-                    output = output_model.model_validate(raw_output.model_dump())
-                elif isinstance(raw_output, (dict, list)):
-                    output = output_model.model_validate(raw_output)
-                elif isinstance(raw_output, (str, bytes, bytearray)):
-                    output = output_model.model_validate_json(raw_output)
-                else:
-                    output = output_model.model_validate(raw_output)
-                if span and hasattr(span, "set_output"):
-                    span.set_output(output.model_dump())
-                return output
-            else:
-                if span and hasattr(span, "set_output"):
-                    span.set_output({"output_preview": str(result.final_output)[:200]})
-                return result
+        return await self.executor.agent_step(
+            agent=agent,
+            instructions=instructions,
+            span_name=span_name,
+            span_type=span_type,
+            output_model=output_model,
+            sync=sync,
+            printer_key=printer_key,
+            printer_title=printer_title,
+            printer_group_id=printer_group_id,
+            printer_border_style=printer_border_style,
+            **span_kwargs
+        )
 
     def update_printer(
         self,
         key: str,
         message: str,
         is_done: bool = False,
-        hide_checkmark: bool = False
+        hide_checkmark: bool = False,
+        title: Optional[str] = None,
+        border_style: Optional[str] = None,
+        group_id: Optional[str] = None,
     ) -> None:
         """Update printer status if printer is active.
+
+        This method delegates to ExecutionContext.
 
         Args:
             key: Status key to update
             message: Status message
             is_done: Whether the task is complete
             hide_checkmark: Whether to hide the checkmark when done
+            title: Optional panel title
+            border_style: Optional border color
+            group_id: Optional group to nest this item in
         """
+        self.execution_context.update_printer(
+            key,
+            message,
+            is_done=is_done,
+            hide_checkmark=hide_checkmark,
+            title=title,
+            border_style=border_style,
+            group_id=group_id
+        )
+
+    def start_group(
+        self,
+        group_id: str,
+        *,
+        title: Optional[str] = None,
+        border_style: Optional[str] = None,
+        iteration: Optional[int] = None,
+    ) -> None:
+        """Start a printer group and notify the reporter."""
+        if self.reporter:
+            self.reporter.record_group_start(
+                group_id=group_id,
+                title=title,
+                border_style=border_style,
+                iteration=iteration,
+            )
         if self.printer:
-            self.printer.update_item(key, message, is_done=is_done, hide_checkmark=hide_checkmark)
+            self.printer.start_group(
+                group_id,
+                title=title,
+                border_style=border_style,
+            )
+
+    def end_group(
+        self,
+        group_id: str,
+        *,
+        is_done: bool = True,
+        title: Optional[str] = None,
+    ) -> None:
+        """Mark a printer group complete and notify the reporter."""
+        if self.reporter:
+            self.reporter.record_group_end(
+                group_id=group_id,
+                is_done=is_done,
+                title=title,
+            )
+        if self.printer:
+            self.printer.end_group(
+                group_id,
+                is_done=is_done,
+                title=title,
+            )
 
     @contextmanager
     def run_context(self, additional_logging: Optional[Callable] = None):
@@ -437,6 +418,8 @@ class BasePipeline:
     ) -> Any:
         """Execute a step with span context and printer updates.
 
+        This method delegates to AgentExecutor from the flow module.
+
         Args:
             step_key: Printer status key
             callable_or_coro: Callable or coroutine to execute
@@ -449,35 +432,15 @@ class BasePipeline:
         Returns:
             Result from callable_or_coro
         """
-        span_factory = agent_span if span_type == "agent" else function_span
-
-        if start_message:
-            self.update_printer(step_key, start_message)
-
-        with self.span_context(span_factory, name=span_name, **span_kwargs) as span:
-            # Execute callable or await coroutine
-            if asyncio.iscoroutine(callable_or_coro):
-                result = await callable_or_coro
-            elif callable(callable_or_coro):
-                result = callable_or_coro()
-            else:
-                result = callable_or_coro
-
-            # Set span output if available
-            if span and hasattr(span, "set_output"):
-                if isinstance(result, dict):
-                    span.set_output(result)
-                elif isinstance(result, str):
-                    span.set_output({"output_preview": result[:200]})
-                elif hasattr(result, "model_dump"):
-                    span.set_output(result.model_dump())
-                else:
-                    span.set_output({"result": str(result)[:200]})
-
-            if done_message:
-                self.update_printer(step_key, done_message, is_done=True)
-
-            return result
+        return await self.executor.run_span_step(
+            step_key=step_key,
+            callable_or_coro=callable_or_coro,
+            span_name=span_name,
+            span_type=span_type,
+            start_message=start_message,
+            done_message=done_message,
+            **span_kwargs
+        )
 
     def prepare_query(
         self,
@@ -536,3 +499,24 @@ class BasePipeline:
 
     async def run(self):  # pragma: no cover - must be implemented by subclasses
         raise NotImplementedError("Subclasses must implement 'run'")
+
+    def _resolve_reporter_artifacts(self):
+        """Resolve reporter artefact configuration from pipeline settings."""
+        pipeline_settings = self.config.pipeline or {}
+        reporter_cfg = pipeline_settings.get("reporter")
+        artifacts = None
+
+        if isinstance(reporter_cfg, Mapping):
+            if reporter_cfg.get("artifacts") is not None:
+                artifacts = reporter_cfg.get("artifacts")
+            elif reporter_cfg.get("preset") is not None:
+                artifacts = reporter_cfg.get("preset")
+            elif reporter_cfg.get("mode") is not None:
+                artifacts = reporter_cfg.get("mode")
+        elif isinstance(reporter_cfg, (list, tuple, set, str)):
+            artifacts = reporter_cfg
+
+        if artifacts is None:
+            artifacts = pipeline_settings.get("output_artifacts")
+
+        return artifacts

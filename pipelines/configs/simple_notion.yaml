@@ -1,0 +1,24 @@
+# Simple Pipeline Configuration - Two Agent Pipeline
+
+# Provider configuration
+provider: "gemini"
+model: "gemini-2.5-flash"
+api_key: "${GEMINI_API_KEY}"
+
+
+prompt: |
+  Create a new page in Notion named "Test Page" and add the following content:
+  - Title: Test Page
+  - Content: This is a test page.
+
+# Pipeline settings
+pipeline:
+  verbose: true
+
+# Agent profiles
+agents:
+  routing_agent:
+    profile: routing_agent_simple_notion
+      
+  notion_agent:
+    profile: notion_agent
