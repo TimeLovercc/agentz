@@ -3,16 +3,10 @@ from __future__ import annotations
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
-<<<<<<< HEAD
-from agents import Agent
-from agentz.configuration.base import BaseConfig, get_agent_spec
-from agentz.agents.registry import register_agent
-=======
 from agentz.agents.base import ResearchAgent as Agent
 from agentz.configuration.base import BaseConfig, get_agent_spec
 from agentz.agents.registry import register_agent
 from agentz.memory.behavior_profiles import behavior_profiles
->>>>>>> dev
 
 
 class KnowledgeGapOutput(BaseModel):
@@ -33,17 +27,9 @@ def create_evaluate_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent
     Returns:
         Agent instance configured for research evaluation
     """
-<<<<<<< HEAD
-    if spec is None:
-        spec = get_agent_spec(cfg, "evaluate_agent")
-
-    instructions = spec["instructions"]
-    params = spec.get("params", {})
-=======
     def _merge_spec(input_spec: Optional[dict]) -> dict:
         if input_spec is None:
             return get_agent_spec(cfg, "evaluate_agent")
->>>>>>> dev
 
         merged = dict(input_spec)
         profile_name = merged.get("profile") or "evaluate_agent"
@@ -75,15 +61,8 @@ def create_evaluate_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent
 
     return Agent(
         name="Research Evaluator",
-<<<<<<< HEAD
-        instructions=instructions,
-        output_type=KnowledgeGapOutput,
-        model=cfg.llm.main_model,
-        **params
-=======
         instructions=spec["instructions"],
         output_type=KnowledgeGapOutput,
         model=cfg.llm.main_model,
         **spec.get("params", {})
->>>>>>> dev
     )

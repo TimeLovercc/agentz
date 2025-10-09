@@ -1,9 +1,4 @@
-<<<<<<< HEAD
-from typing import Dict, Any, Optional
-import os
-=======
 from typing import Dict, Any, Optional, Union
->>>>>>> dev
 
 from agents import (
     OpenAIChatCompletionsModel,

@@ -1,19 +1,11 @@
 from __future__ import annotations
 
 from typing import Optional
-<<<<<<< HEAD
-from loguru import logger
-
-from agents import Agent
-from agentz.configuration.base import BaseConfig, get_agent_spec
-from agentz.agents.registry import register_agent
-=======
 
 from agentz.agents.base import ResearchAgent as Agent
 from agentz.configuration.base import BaseConfig, get_agent_spec
 from agentz.agents.registry import register_agent
 from agentz.memory.behavior_profiles import behavior_profiles
->>>>>>> dev
 
 
 @register_agent("writer_agent", aliases=["writer"])
@@ -27,17 +19,9 @@ def create_writer_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
     Returns:
         Agent instance configured for technical writing
     """
-<<<<<<< HEAD
-    if spec is None:
-        spec = get_agent_spec(cfg, "writer_agent")
-
-    instructions = spec["instructions"]
-    params = spec.get("params", {})
-=======
     def _merge_spec(input_spec: Optional[dict]) -> dict:
         if input_spec is None:
             return get_agent_spec(cfg, "writer_agent")
->>>>>>> dev
 
         merged = dict(input_spec)
         profile_name = merged.get("profile") or "writer_agent"
@@ -69,13 +53,7 @@ def create_writer_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
 
     return Agent(
         name="Technical Writer",
-<<<<<<< HEAD
-        instructions=instructions,
-        model=cfg.llm.main_model,
-        **params
-=======
         instructions=spec["instructions"],
         model=cfg.llm.main_model,
         **spec.get("params", {})
->>>>>>> dev
     )
