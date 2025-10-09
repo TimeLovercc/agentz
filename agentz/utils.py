@@ -727,6 +727,38 @@ class OutputParserError(Exception):
         return self.message
 
 
+def _escape_unescaped_quotes(json_text: str) -> str:
+    """Escape bare double quotes that appear inside JSON string values."""
+    result: List[str] = []
+    in_string = False
+    escape_next = False
+    for index, char in enumerate(json_text):
+        if escape_next:
+            result.append(char)
+            escape_next = False
+            continue
+        if char == '\\':
+            result.append(char)
+            escape_next = True
+            continue
+        if char == '"':
+            if in_string:
+                lookahead = index + 1
+                while lookahead < len(json_text) and json_text[lookahead] in " \t\r\n":
+                    lookahead += 1
+                if lookahead < len(json_text) and json_text[lookahead] not in ",}]":
+                    result.append('\\"')
+                else:
+                    result.append('"')
+                    in_string = False
+            else:
+                in_string = True
+                result.append('"')
+        else:
+            result.append(char)
+    return "".join(result)
+
+
 def find_json_in_string(string: str) -> str:
     """
     Method to extract all text in the left-most brace that appears in a string.
@@ -760,6 +792,12 @@ def parse_json_output(output: str) -> Any:
     try:
         return json.loads(output)
     except json.JSONDecodeError as e:
+        escaped_output = _escape_unescaped_quotes(output)
+        if escaped_output != output:
+            try:
+                return json.loads(escaped_output)
+            except json.JSONDecodeError:
+                pass
         pass
 
     # If that fails, assume that the output is in a code block - remove the code block markers and try again
@@ -771,6 +809,12 @@ def parse_json_output(output: str) -> Any:
     try:
         return json.loads(parsed_output)
     except json.JSONDecodeError:
+        escaped_output = _escape_unescaped_quotes(parsed_output)
+        if escaped_output != parsed_output:
+            try:
+                return json.loads(escaped_output)
+            except json.JSONDecodeError:
+                pass
         pass
 
     # As a last attempt, try to manually find the JSON object in the output and parse it
@@ -779,6 +823,12 @@ def parse_json_output(output: str) -> Any:
         try:
             return json.loads(parsed_output)
         except json.JSONDecodeError:
+            escaped_output = _escape_unescaped_quotes(parsed_output)
+            if escaped_output != parsed_output:
+                try:
+                    return json.loads(escaped_output)
+                except json.JSONDecodeError:
+                    pass
             raise OutputParserError(f"Failed to parse output as JSON", output)
 
     # If all fails, raise an error

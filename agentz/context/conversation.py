@@ -1,13 +1,26 @@
 from __future__ import annotations
 
 import time
-from typing import List, Optional
+from typing import TYPE_CHECKING, Any, List, Optional
 
 from pydantic import BaseModel, Field
 
-from agentz.agents.manager_agents.evaluate_agent import KnowledgeGapOutput
-from agentz.agents.manager_agents.routing_agent import AgentSelectionPlan, AgentTask
 from agentz.agents.registry import ToolAgentOutput
+
+if TYPE_CHECKING:
+    from agentz.agents.manager_agents.routing_agent import AgentSelectionPlan, AgentTask
+else:
+    AgentSelectionPlan = AgentTask = Any
+
+
+class KnowledgeGapOutput(BaseModel):
+    """Evaluation result capturing research completion status and gaps."""
+
+    research_complete: bool = Field(description="Whether the research is complete")
+    outstanding_gaps: List[str] = Field(
+        description="List of outstanding knowledge gaps", default_factory=list
+    )
+    reasoning: str = Field(description="Reasoning behind the evaluation", default="")
 
 
 class ToolExecutionResult(BaseModel):

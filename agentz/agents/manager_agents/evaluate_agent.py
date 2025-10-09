@@ -1,19 +1,12 @@
 from __future__ import annotations
 
-from typing import List, Optional
-from pydantic import BaseModel, Field
+from typing import Optional
 
 from agentz.agents.base import ResearchAgent as Agent
-from agentz.configuration.base import BaseConfig, get_agent_spec
 from agentz.agents.registry import register_agent
+from agentz.configuration.base import BaseConfig, get_agent_spec
 from agentz.context.behavior_profiles import behavior_profiles
-
-
-class KnowledgeGapOutput(BaseModel):
-    """Output model for evaluation of research gaps."""
-    research_complete: bool = Field(description="Whether the research is complete")
-    outstanding_gaps: List[str] = Field(description="List of outstanding knowledge gaps", default_factory=list)
-    reasoning: str = Field(description="Reasoning behind the evaluation", default="")
+from agentz.context.conversation import KnowledgeGapOutput
 
 
 @register_agent("evaluate_agent", aliases=["evaluate"])
