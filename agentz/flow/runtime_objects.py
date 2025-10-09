@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 
 from pydantic import BaseModel
 
-from agentz.memory.behavior_profiles import runtime_prompts
+from agentz.context.engine import ContextEngine
 from agentz.memory.conversation import ConversationState
 
 
@@ -38,15 +38,55 @@ class AgentCapability:
 
 
 class PipelineContext:
-    """Holds shared conversation state and prompt rendering utilities."""
+    """Facade over ContextEngine used by flow executors."""
 
-    def __init__(self, state: ConversationState):
-        self.state = state
+    def __init__(
+        self,
+        state: ConversationState,
+        *,
+        engine: Optional[ContextEngine] = None,
+    ):
+        self._engine = engine or ContextEngine(state)
+
+    @property
+    def engine(self) -> ContextEngine:
+        return self._engine
+
+    @property
+    def state(self) -> ConversationState:
+        return self._engine.state
 
     def render_prompt(self, profile: str, template: str, payload: Dict[str, Any]) -> str:
-        return runtime_prompts.render(profile, template, **payload)
+        return self._engine.render_prompt(profile, template, payload)
 
-    # Convenience accessors for readability
+    def build_prompt(
+        self,
+        agent_key: str,
+        profile: str,
+        template: str,
+        *,
+        overrides: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        return self._engine.build_prompt(
+            agent_key,
+            profile,
+            template,
+            overrides=overrides,
+        )
+
+    def register_snapshot(self, agent_key: str, builder) -> None:
+        self._engine.register_snapshot(agent_key, builder)
+
+    def register_output_handler(self, agent_key: str, handler) -> None:
+        self._engine.register_output_handler(agent_key, handler)
+
+    def snapshot(self, agent_key: str) -> Dict[str, Any]:
+        return self._engine.snapshot(agent_key)
+
+    def apply_output(self, agent_key: str, output: Any) -> None:
+        self._engine.apply_output(agent_key, output)
+
+    # Backwards compatibility for existing usage
     @property
     def iteration(self) -> ConversationState:
         return self.state

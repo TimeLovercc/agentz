@@ -1,67 +1,149 @@
+from __future__ import annotations
+
+import json
 from typing import Any, Callable, Optional
-from agents import Agent, Runner, RunResult
+
+from pydantic import BaseModel
+
+from agents import Agent, RunResult, Runner
 from agents.run_context import TContext
+
+PromptBuilder = Callable[[Any, Any, "ResearchAgent"], str]
 
 
 class ResearchAgent(Agent[TContext]):
-    """
-    This is a custom implementation of the OpenAI Agent class that supports output parsing
-    for models that don't support structured output types. The user can specify an output_parser
-    function that will be called with the raw output from the agent. This can run custom logic 
-    such as cleaning up the output and converting it to a structured JSON object.
+    """Capability-centric wrapper that binds LLM + tools + typed IO contract."""
 
-    Needs to be run with the ResearchRunner to work.
-    """
-    
     def __init__(
         self,
-        *args,
+        *args: Any,
+        input_model: type[BaseModel] | None = None,
+        output_model: type[BaseModel] | None = None,
+        prompt_builder: PromptBuilder | None = None,
+        default_span_type: str = "agent",
         output_parser: Optional[Callable[[str], Any]] = None,
-        **kwargs
-    ):
-        # The output_parser is a function that only takes effect if output_type is not specified
+        **kwargs: Any,
+    ) -> None:
+        if output_model and kwargs.get("output_type"):
+            raise ValueError("Use either output_model or output_type, not both.")
+        if output_model is not None:
+            kwargs["output_type"] = output_model
+
+        super().__init__(*args, **kwargs)
+
+        self.input_model = input_model
+        self.output_model = self._coerce_output_model(output_model or getattr(self, "output_type", None))
+        self.prompt_builder = prompt_builder
+        self.default_span_type = default_span_type
         self.output_parser = output_parser
 
-        # If both are specified, we raise an error - they can't be used together
-        if self.output_parser and kwargs.get('output_type'):
-            raise ValueError("Cannot specify both output_parser and output_type")
-            
-        super().__init__(*args, **kwargs)
-    
+    @staticmethod
+    def _coerce_output_model(candidate: Any) -> type[BaseModel] | None:
+        if isinstance(candidate, type) and issubclass(candidate, BaseModel):
+            return candidate
+        return None
+
+    def _coerce_input(self, payload: Any) -> Any:
+        if self.input_model is None or payload is None:
+            return payload
+        if isinstance(payload, self.input_model):
+            return payload
+        if isinstance(payload, BaseModel):
+            return self.input_model.model_validate(payload.model_dump())
+        if isinstance(payload, dict):
+            return self.input_model.model_validate(payload)
+        msg = f"{self.name} expects input compatible with {self.input_model.__name__}"
+        raise TypeError(msg)
+
+    @staticmethod
+    def _to_prompt_payload(payload: Any) -> dict[str, Any]:
+        if payload is None:
+            return {}
+        if isinstance(payload, BaseModel):
+            return payload.model_dump()
+        if isinstance(payload, dict):
+            return payload
+        return {"input": payload}
+
+    def build_prompt(
+        self,
+        payload: Any = None,
+        *,
+        context: Any = None,
+        template: Optional[str] = None,
+    ) -> str:
+        validated = self._coerce_input(payload)
+
+        if self.prompt_builder:
+            return self.prompt_builder(validated, context, self)
+
+        if context is not None and template:
+            builder = getattr(context, "build_prompt", None)
+            if builder is None:
+                raise AttributeError("Context object must expose build_prompt(...)")
+            prompt_data = self._to_prompt_payload(validated)
+            return builder(agent=self, template_name=template, data=prompt_data)
+
+        if isinstance(validated, str):
+            return validated
+        if isinstance(validated, BaseModel):
+            return validated.model_dump_json(indent=2)
+        if isinstance(validated, dict):
+            return json.dumps(validated, indent=2)
+
+        if validated is None and isinstance(self.instructions, str):
+            return self.instructions
+
+        return str(validated)
+
+    async def invoke(
+        self,
+        *,
+        pipeline: Any,
+        span_name: str,
+        payload: Any = None,
+        prompt: Optional[str] = None,
+        context: Any = None,
+        template: Optional[str] = None,
+        span_type: Optional[str] = None,
+        output_model: Optional[type[BaseModel]] = None,
+        printer_key: Optional[str] = None,
+        printer_title: Optional[str] = None,
+        printer_group_id: Optional[str] = None,
+        printer_border_style: Optional[str] = None,
+        **span_kwargs: Any,
+    ) -> Any:
+        instructions = prompt or self.build_prompt(payload, context=context, template=template)
+        model = output_model or self.output_model
+
+        return await pipeline.agent_step(
+            agent=self,
+            instructions=instructions,
+            span_name=span_name,
+            span_type=span_type or self.default_span_type,
+            output_model=model,
+            printer_key=printer_key,
+            printer_title=printer_title,
+            printer_group_id=printer_group_id,
+            printer_border_style=printer_border_style,
+            **span_kwargs,
+        )
 
     async def parse_output(self, run_result: RunResult) -> RunResult:
-        """
-        Process the RunResult by applying the output_parser to its final_output if specified.
-        This preserves the RunResult structure while modifying its content.
-        """
-        if self.output_parser:
-            raw_output = run_result.final_output            
-            parsed_output = self.output_parser(raw_output)
-            run_result.final_output = parsed_output            
+        """Apply legacy string parser only when no structured output is configured."""
+        if self.output_parser and self.output_model is None:
+            run_result.final_output = self.output_parser(run_result.final_output)
         return run_result
-    
+
 
 class ResearchRunner(Runner):
-    """
-    Custom implementation of the OpenAI Runner class that supports output parsing
-    for models that don't support structured output types with tools. 
-    
-    Needs to be run with the ResearchAgent class.
-    """
-    
+    """Runner shim that invokes ResearchAgent.parse_output after execution."""
+
     @classmethod
-    async def run(cls, *args, **kwargs) -> RunResult:
-        """
-        Run the agent and process its output with the custom parser if applicable.
-        """
-        # Call the original run method
+    async def run(cls, *args: Any, **kwargs: Any) -> RunResult:
         result = await Runner.run(*args, **kwargs)
-        
-        # Get the starting agent
-        starting_agent = kwargs.get('starting_agent') or args[0]
-        
-        # If the starting agent is of type ResearchAgent, parse the output
+        starting_agent = kwargs.get("starting_agent") or (args[0] if args else None)
+
         if isinstance(starting_agent, ResearchAgent):
             return await starting_agent.parse_output(result)
-        
         return result

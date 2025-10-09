@@ -77,9 +77,10 @@ class FlowRunner:
     async def execute(self, pipeline_context: PipelineContext) -> ConversationState:
         """Run the flow until completion and return the updated conversation state."""
         state = pipeline_context.state
+        engine = pipeline_context.engine
 
         while self.iteration_flow.loop_condition(pipeline_context):
-            iteration = state.begin_iteration()
+            iteration = engine.begin_iteration()
             iteration_group = f"iter-{iteration.index}"
             self.pipeline.iteration = iteration.index
             self.pipeline.start_group(
@@ -103,7 +104,7 @@ class FlowRunner:
                 if state.complete:
                     break
 
-            state.mark_iteration_complete()
+            engine.mark_iteration_complete()
             if self.iteration_flow.after_iteration:
                 self.iteration_flow.after_iteration(pipeline_context)
 

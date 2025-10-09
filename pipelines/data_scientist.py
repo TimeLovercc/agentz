@@ -56,6 +56,10 @@ class DataScientistPipeline(BasePipeline):
             loop_condition=self._should_continue_loop,
         )
         self.final_nodes = self._build_final_nodes()
+        # Optional report configuration
+        self.report_length: Optional[str] = None
+        self.report_instructions: Optional[str] = None
+
         self.flow_runner = FlowRunner(
             self,
             agents=self.agents,
@@ -63,14 +67,98 @@ class DataScientistPipeline(BasePipeline):
             final_nodes=self.final_nodes,
         )
         self.pipeline_context = PipelineContext(self.conversation)
-
-        # Optional report configuration
-        self.report_length: Optional[str] = None
-        self.report_instructions: Optional[str] = None
+        self._register_context_bindings()
 
     # ------------------------------------------------------------------
     # Flow configuration
     # ------------------------------------------------------------------
+    def _register_context_bindings(self) -> None:
+        """Register snapshot and output handlers with the context engine."""
+        ctx = self.pipeline_context
+        ctx.register_snapshot("observe_agent", self._observation_snapshot)
+        ctx.register_snapshot("evaluate_agent", self._evaluation_snapshot)
+        ctx.register_snapshot("routing_agent", self._routing_snapshot)
+        ctx.register_snapshot("writer_agent", self._writer_snapshot)
+
+        ctx.register_output_handler("observe_agent", self._apply_observation_output)
+        ctx.register_output_handler("evaluate_agent", self._apply_evaluation_output)
+        ctx.register_output_handler("routing_agent", self._apply_routing_output)
+        ctx.register_output_handler("writer_agent", self._apply_writer_output)
+
+    def _observation_snapshot(self, state: ConversationState) -> Dict[str, Any]:
+        history = state.iteration_history()
+        if not history:
+            history = "No previous actions, findings or thoughts available."
+        return {
+            "ITERATION": state.current_iteration.index,
+            "QUERY": state.query,
+            "HISTORY": history,
+        }
+
+    def _evaluation_snapshot(self, state: ConversationState) -> Dict[str, Any]:
+        history = state.iteration_history(include_current=True)
+        if not history:
+            history = "No previous actions, findings or thoughts available."
+        return {
+            "ITERATION": state.current_iteration.index,
+            "ELAPSED_MINUTES": f"{state.elapsed_minutes():.2f}",
+            "MAX_MINUTES": self.max_time_minutes,
+            "QUERY": state.query,
+            "HISTORY": history,
+        }
+
+    def _routing_snapshot(self, state: ConversationState) -> Dict[str, Any]:
+        history = state.iteration_history(include_current=True)
+        if not history:
+            history = "No previous actions, findings or thoughts available."
+        gap = state.current_iteration.selected_gap or "No specific gap provided."
+        return {
+            "QUERY": state.query,
+            "GAP": gap,
+            "HISTORY": history,
+        }
+
+    def _writer_snapshot(self, state: ConversationState) -> Dict[str, Any]:
+        findings_text = state.findings_text() or "No findings available yet."
+        guidelines_chunks = []
+        if self.report_length:
+            guidelines_chunks.append(f"* The full response should be approximately {self.report_length}.")
+        if self.report_instructions:
+            guidelines_chunks.append(f"* {self.report_instructions}")
+        guidelines_block = ""
+        if guidelines_chunks:
+            guidelines_block = "\n\nGUIDELINES:\n" + "\n".join(guidelines_chunks)
+
+        return {
+            "GUIDELINES_BLOCK": guidelines_block,
+            "USER_PROMPT": self.config.prompt,
+            "DATA_PATH": self.config.data_path or "Not provided",
+            "FINDINGS": findings_text,
+        }
+
+    def _apply_observation_output(self, state: ConversationState, result: Any) -> None:
+        final_output = getattr(result, "final_output", None)
+        if final_output is None:
+            final_output = str(result)
+        state.current_iteration.observation = final_output
+
+    def _apply_evaluation_output(self, state: ConversationState, result: KnowledgeGapOutput) -> None:
+        state.current_iteration.evaluation = result
+        if result.research_complete:
+            state.mark_research_complete()
+            return
+        if result.outstanding_gaps:
+            state.current_iteration.selected_gap = result.outstanding_gaps[0]
+
+    def _apply_routing_output(self, state: ConversationState, result: AgentSelectionPlan) -> None:
+        state.current_iteration.route_plan = result
+
+    def _apply_writer_output(self, state: ConversationState, result: Any) -> None:
+        final_output = getattr(result, "final_output", None)
+        if final_output is None:
+            final_output = str(result)
+        state.final_report = final_output
+
     def _build_iteration_nodes(self) -> List[FlowNode]:
         return [
             FlowNode(
@@ -192,89 +280,31 @@ class DataScientistPipeline(BasePipeline):
     # Input builders
     # ------------------------------------------------------------------
     def _build_observation_payload(self, context: PipelineContext) -> Dict[str, Any]:
-        state = context.state
-        history = state.iteration_history()
-        if not history:
-            history = "No previous actions, findings or thoughts available."
-        return {
-            "ITERATION": state.current_iteration.index,
-            "QUERY": state.query,
-            "HISTORY": history,
-        }
+        return self._observation_snapshot(context.state)
 
     def _build_evaluation_payload(self, context: PipelineContext) -> Dict[str, Any]:
-        state = context.state
-        history = state.iteration_history(include_current=True)
-        if not history:
-            history = "No previous actions, findings or thoughts available."
-        return {
-            "ITERATION": state.current_iteration.index,
-            "ELAPSED_MINUTES": f"{state.elapsed_minutes():.2f}",
-            "MAX_MINUTES": self.max_time_minutes,
-            "QUERY": state.query,
-            "HISTORY": history,
-        }
+        return self._evaluation_snapshot(context.state)
 
     def _build_routing_payload(self, context: PipelineContext) -> Dict[str, Any]:
-        state = context.state
-        history = state.iteration_history(include_current=True)
-        if not history:
-            history = "No previous actions, findings or thoughts available."
-        gap = state.current_iteration.selected_gap or "No specific gap provided."
-        return {
-            "QUERY": state.query,
-            "GAP": gap,
-            "HISTORY": history,
-        }
+        return self._routing_snapshot(context.state)
 
     def _build_writer_payload(self, context: PipelineContext) -> Dict[str, Any]:
-        state = context.state
-        findings_text = state.findings_text() or "No findings available yet."
-        guidelines_chunks = []
-        if self.report_length:
-            guidelines_chunks.append(f"* The full response should be approximately {self.report_length}.")
-        if self.report_instructions:
-            guidelines_chunks.append(f"* {self.report_instructions}")
-        guidelines_block = ""
-        if guidelines_chunks:
-            guidelines_block = "\n\nGUIDELINES:\n" + "\n".join(guidelines_chunks)
-
-        return {
-            "GUIDELINES_BLOCK": guidelines_block,
-            "USER_PROMPT": self.config.prompt,
-            "DATA_PATH": self.config.data_path or "Not provided",
-            "FINDINGS": findings_text,
-        }
+        return self._writer_snapshot(context.state)
 
     # ------------------------------------------------------------------
     # Output handlers
     # ------------------------------------------------------------------
     def _handle_observation_output(self, context: PipelineContext, result: Any) -> None:
-        state = context.state
-        final_output = getattr(result, "final_output", None)
-        if final_output is None:
-            final_output = str(result)
-        state.current_iteration.observation = final_output
+        context.apply_output("observe_agent", result)
 
     def _handle_evaluation_output(self, context: PipelineContext, result: KnowledgeGapOutput) -> None:
-        state = context.state
-        state.current_iteration.evaluation = result
-        if result.research_complete:
-            state.mark_research_complete()
-            return
-        if result.outstanding_gaps:
-            state.current_iteration.selected_gap = result.outstanding_gaps[0]
+        context.apply_output("evaluate_agent", result)
 
     def _handle_routing_output(self, context: PipelineContext, result: AgentSelectionPlan) -> None:
-        state = context.state
-        state.current_iteration.route_plan = result
+        context.apply_output("routing_agent", result)
 
     def _handle_writer_output(self, context: PipelineContext, result: Any) -> None:
-        state = context.state
-        final_output = getattr(result, "final_output", None)
-        if final_output is None:
-            final_output = str(result)
-        state.final_report = final_output
+        context.apply_output("writer_agent", result)
 
     # ------------------------------------------------------------------
     # Tool execution runner
@@ -285,6 +315,9 @@ class DataScientistPipeline(BasePipeline):
         plan = iteration.route_plan
         if not plan or not plan.tasks:
             return
+
+        iteration.tools.clear()
+        iteration.findings.clear()
 
         async def _run_single(task: AgentTask) -> ToolExecutionResult:
             agent = self.tool_agents.get(task.agent)
@@ -337,10 +370,11 @@ class DataScientistPipeline(BasePipeline):
             )
             results.append(result)
 
-        iteration.tools = results
-        iteration.findings = [
-            result.output.output for result in results if hasattr(result.output, "output")
-        ]
+        for tool_result in results:
+            pipeline_context.engine.record_tool_execution(tool_result)
+            output_value = getattr(tool_result.output, "output", None)
+            if output_value:
+                pipeline_context.engine.add_finding(output_value)
 
     # ------------------------------------------------------------------
     # Finalisation helpers

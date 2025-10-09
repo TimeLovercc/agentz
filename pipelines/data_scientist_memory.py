@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from agentz.memory.conversation import ConversationState
 from agentz.agents.manager_agents.memory_agent import MemoryAgentOutput
 from agentz.agents.registry import create_agents
 from pipelines.data_scientist import DataScientistPipeline
@@ -31,45 +32,19 @@ class DataScientistMemoryPipeline(DataScientistPipeline):
             iteration_flow=self.iteration_flow,
             final_nodes=self.final_nodes,
         )
+        self._register_memory_context_bindings()
 
     # ------------------------------------------------------------------
     # Conversation helpers
     # ------------------------------------------------------------------
     def _build_observation_payload(self, context: PipelineContext) -> Dict[str, Any]:
-        state = context.state
-        history = state.history_with_summary()
-        if not history:
-            history = "No previous actions, findings or thoughts available."
-        return {
-            "ITERATION": state.current_iteration.index,
-            "QUERY": state.query,
-            "HISTORY": history,
-        }
+        return self._observation_snapshot(context.state)
 
     def _build_evaluation_payload(self, context: PipelineContext) -> Dict[str, Any]:
-        state = context.state
-        history = state.history_with_summary()
-        if not history:
-            history = "No previous actions, findings or thoughts available."
-        return {
-            "ITERATION": state.current_iteration.index,
-            "ELAPSED_MINUTES": f"{state.elapsed_minutes():.2f}",
-            "MAX_MINUTES": self.max_time_minutes,
-            "QUERY": state.query,
-            "HISTORY": history,
-        }
+        return self._evaluation_snapshot(context.state)
 
     def _build_routing_payload(self, context: PipelineContext) -> Dict[str, Any]:
-        state = context.state
-        history = state.history_with_summary()
-        if not history:
-            history = "No previous actions, findings or thoughts available."
-        gap = state.current_iteration.selected_gap or "No specific gap provided."
-        return {
-            "QUERY": state.query,
-            "GAP": gap,
-            "HISTORY": history,
-        }
+        return self._routing_snapshot(context.state)
 
     # ------------------------------------------------------------------
     # Flow configuration with memory node
@@ -95,7 +70,56 @@ class DataScientistMemoryPipeline(DataScientistPipeline):
         return nodes
 
     def _build_memory_payload(self, context: PipelineContext) -> Dict[str, Any]:
+        return self._memory_snapshot(context.state)
+
+    def _handle_memory_output(self, context: PipelineContext, result: MemoryAgentOutput) -> None:
+        context.apply_output("memory_agent", result)
+
+    def _should_run_memory_node(self, context: PipelineContext) -> bool:
         state = context.state
+        if state.complete:
+            return False
+        return bool(state.unsummarized_history())
+
+    def _register_memory_context_bindings(self) -> None:
+        ctx = self.pipeline_context
+        ctx.register_snapshot("memory_agent", self._memory_snapshot)
+        ctx.register_output_handler("memory_agent", self._apply_memory_output)
+
+    def _observation_snapshot(self, state: ConversationState) -> Dict[str, Any]:
+        history = state.history_with_summary()
+        if not history:
+            history = "No previous actions, findings or thoughts available."
+        return {
+            "ITERATION": state.current_iteration.index,
+            "QUERY": state.query,
+            "HISTORY": history,
+        }
+
+    def _evaluation_snapshot(self, state: ConversationState) -> Dict[str, Any]:
+        history = state.history_with_summary()
+        if not history:
+            history = "No previous actions, findings or thoughts available."
+        return {
+            "ITERATION": state.current_iteration.index,
+            "ELAPSED_MINUTES": f"{state.elapsed_minutes():.2f}",
+            "MAX_MINUTES": self.max_time_minutes,
+            "QUERY": state.query,
+            "HISTORY": history,
+        }
+
+    def _routing_snapshot(self, state: ConversationState) -> Dict[str, Any]:
+        history = state.history_with_summary()
+        if not history:
+            history = "No previous actions, findings or thoughts available."
+        gap = state.current_iteration.selected_gap or "No specific gap provided."
+        return {
+            "QUERY": state.query,
+            "GAP": gap,
+            "HISTORY": history,
+        }
+
+    def _memory_snapshot(self, state: ConversationState) -> Dict[str, Any]:
         unsummarized = state.unsummarized_history()
         if not unsummarized:
             unsummarized = "No previous unsummarized actions, findings or thoughts available."
@@ -106,11 +130,5 @@ class DataScientistMemoryPipeline(DataScientistPipeline):
             "CONVERSATION_HISTORY": unsummarized,
         }
 
-    def _handle_memory_output(self, context: PipelineContext, result: MemoryAgentOutput) -> None:
-        context.state.update_summary(result.summary)
-
-    def _should_run_memory_node(self, context: PipelineContext) -> bool:
-        state = context.state
-        if state.complete:
-            return False
-        return bool(state.unsummarized_history())
+    def _apply_memory_output(self, state: ConversationState, result: MemoryAgentOutput) -> None:
+        state.update_summary(result.summary)
