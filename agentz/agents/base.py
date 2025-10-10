@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Callable, Optional
+import inspect
+from collections.abc import Mapping
+from typing import Any, Callable, Dict, Optional
 
 from pydantic import BaseModel
 
 from agents import Agent, RunResult, Runner
 from agents.run_context import TContext
+from agentz.agents.registry import create_agents
+from agentz.context.engine import BehaviorHandle
 
 PromptBuilder = Callable[[Any, Any, "ResearchAgent"], str]
 
@@ -146,4 +150,85 @@ class ResearchRunner(Runner):
 
         if isinstance(starting_agent, ResearchAgent):
             return await starting_agent.parse_output(result)
+        return result
+
+
+class ContextAgent:
+    """Minimal agent facade that binds a behavior handle to a concrete runtime agent."""
+
+    def __init__(
+        self,
+        handle: BehaviorHandle,
+        *,
+        span_name: str,
+        span_type: str,
+        printer_key: str,
+        printer_title: str,
+        output_model: Optional[type[BaseModel]] = None,
+    ):
+        self.handle = handle
+        self.span_name = span_name
+        self.span_type = span_type
+        self.printer_key = printer_key
+        self.printer_title = printer_title
+        self.output_model = output_model
+        self._agent: Optional[Agent] = None
+        self._pipeline: Optional[Any] = None
+
+    def bind(self, pipeline: Any) -> None:
+        """Bind the context agent to a pipeline runtime."""
+        self._pipeline = pipeline
+
+    @property
+    def agent(self) -> Agent:
+        if self._agent is None:
+            agent_name = self.handle.agent_name or f"{self.handle.key}_agent"
+            config = self.handle.config
+            if config is None:
+                raise ValueError("ContextAgent requires context engine to include configuration.")
+            self._agent = create_agents(agent_name, config)
+        return self._agent
+
+    async def __call__(self, payload: Optional[Any] = None) -> Any:
+        if self._pipeline is None:
+            frame = inspect.currentframe()
+            try:
+                caller = frame.f_back if frame else None
+                candidate = caller.f_locals.get("self") if caller else None
+                if candidate is None or not hasattr(candidate, "agent_step"):
+                    raise RuntimeError("ContextAgent could not infer pipeline binding automatically.")
+                self._pipeline = candidate
+            finally:
+                del frame
+
+        snapshot = self.handle.snapshot()
+        render_payload: Dict[str, Any] = {}
+
+        if isinstance(snapshot, Mapping):
+            render_payload.update(snapshot)
+        elif isinstance(snapshot, BaseModel):
+            render_payload.update(snapshot.model_dump())
+
+        if payload is not None:
+            if isinstance(payload, Mapping):
+                render_payload.update(payload)
+            elif isinstance(payload, BaseModel):
+                render_payload.update(payload.model_dump())
+            else:
+                render_payload["input"] = payload
+
+        instructions = self.handle.render(render_payload or None)
+
+        result = await self._pipeline.agent_step(
+            agent=self.agent,
+            instructions=instructions,
+            span_name=self.span_name,
+            span_type=self.span_type,
+            output_model=self.output_model,
+            printer_key=self.printer_key,
+            printer_title=self.printer_title,
+            printer_group_id=getattr(self._pipeline, "current_printer_group", None),
+        )
+
+        self.handle.apply_output(result)
         return result

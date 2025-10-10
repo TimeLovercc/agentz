@@ -2,19 +2,128 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Dict, Optional
 
 from loguru import logger
 
+from agentz.agents.base import ContextAgent
 from agentz.agents.manager_agents.evaluate_agent import KnowledgeGapOutput
 from agentz.agents.manager_agents.routing_agent import AgentSelectionPlan, AgentTask
 from agentz.agents.registry import ToolAgentOutput, create_agents
-from agentz.context.behavior_profiles import behavior_registry
-from agentz.context.engine import ContextEngine
-from agentz.flow import auto_trace, IterationManager, WorkflowOrchestrator
 from agentz.context.conversation import ConversationState, ToolExecutionResult
+from agentz.context.engine import ContextEngine
 from agentz.context.global_memory import global_memory
+from agentz.flow import auto_trace
 from pipelines.base import BasePipeline
+
+
+@dataclass(frozen=True)
+class BehaviorExecutionConfig:
+    span_name: str
+    span_type: str
+    printer_key: str
+    printer_title: str
+    output_model: Optional[type] = None
+
+
+BEHAVIOR_EXECUTION_CONFIGS: Dict[str, BehaviorExecutionConfig] = {
+    "observe": BehaviorExecutionConfig(
+        span_name="generate_observations",
+        span_type="function",
+        printer_key="observe",
+        printer_title="Observations",
+    ),
+    "evaluate": BehaviorExecutionConfig(
+        span_name="evaluate_research_state",
+        span_type="function",
+        printer_key="evaluate",
+        printer_title="Evaluation",
+        output_model=KnowledgeGapOutput,
+    ),
+    "route": BehaviorExecutionConfig(
+        span_name="route_tasks",
+        span_type="tool",
+        printer_key="route",
+        printer_title="Routing",
+        output_model=AgentSelectionPlan,
+    ),
+    "writer": BehaviorExecutionConfig(
+        span_name="writer_agent",
+        span_type="agent",
+        printer_key="writer",
+        printer_title="Writer",
+    ),
+}
+
+
+async def execute_tool_plan(
+    *,
+    pipeline: BasePipeline,
+    context: ContextEngine,
+    tool_agents: Dict[str, object],
+    iteration_group: str,
+) -> None:
+    state = context.state
+    plan = state.current_iteration.route_plan
+    if not plan or not plan.tasks:
+        return
+
+    state.current_iteration.tools.clear()
+    state.current_iteration.findings.clear()
+
+    async def run_single(task: AgentTask) -> ToolExecutionResult:
+        agent = tool_agents.get(task.agent)
+        if agent is None:
+            output = ToolAgentOutput(
+                output=f"No implementation found for agent {task.agent}",
+                sources=[],
+            )
+            result = ToolExecutionResult(task=task, output=output)
+            pipeline.update_printer(
+                key=f"{iteration_group}:tool:{task.agent}",
+                message=f"Completed {task.agent}",
+                is_done=True,
+                group_id=iteration_group,
+            )
+            return result
+
+        raw_result = await pipeline.agent_step(
+            agent=agent,
+            instructions=task.model_dump_json(),
+            span_name=task.agent,
+            span_type="tool",
+            output_model=ToolAgentOutput,
+            printer_key=f"tool:{task.agent}",
+            printer_title=f"Tool: {task.agent}",
+            printer_group_id=iteration_group,
+        )
+
+        if isinstance(raw_result, ToolAgentOutput):
+            output = raw_result
+        elif hasattr(raw_result, "final_output_as"):
+            output = raw_result.final_output_as(ToolAgentOutput)
+        elif hasattr(raw_result, "final_output"):
+            output = ToolAgentOutput(output=str(raw_result.final_output), sources=[])
+        else:
+            output = ToolAgentOutput(output=str(raw_result), sources=[])
+
+        result = ToolExecutionResult(task=task, output=output)
+        pipeline.update_printer(
+            key=f"{iteration_group}:tool:{task.agent}",
+            message=f"Completed {task.agent}",
+            is_done=True,
+            group_id=iteration_group,
+        )
+        return result
+
+    coroutines = [run_single(task) for task in plan.tasks]
+    for coro in asyncio.as_completed(coroutines):
+        tool_result = await coro
+        context.record_tool_execution(tool_result)
+        output_value = getattr(tool_result.output, "output", None)
+        if output_value:
+            context.add_finding(output_value)
 
 
 class DataScientistPipeline(BasePipeline):
@@ -23,7 +132,6 @@ class DataScientistPipeline(BasePipeline):
     def __init__(self, config):
         super().__init__(config)
 
-        # Centralized context engine with state and behaviors
         self.context = ContextEngine(
             state=ConversationState(
                 query="",
@@ -31,239 +139,119 @@ class DataScientistPipeline(BasePipeline):
                 max_iterations=self.max_iterations,
                 max_minutes=self.max_time_minutes,
             ),
-            behaviors=["observe", "evaluate", "route", "writer"]
+            behaviors=["observe", "evaluate", "route", "writer"],
+            config=self.config,
+            behavior_agents={
+                "observe": "observe_agent",
+                "evaluate": "evaluate_agent",
+                "route": "routing_agent",
+                "writer": "writer_agent",
+            },
         )
 
-        # Manager agents (created on-demand via config)
-        manager_agents = {
-            "observe_agent": create_agents("observe_agent", config),
-            "evaluate_agent": create_agents("evaluate_agent", config),
-            "routing_agent": create_agents("routing_agent", config),
-            "writer_agent": create_agents("writer_agent", config),
-        }
+        self.observe_agent = ContextAgent(self.context["observe"])
+        self.evaluate_agent = ContextAgent(self.context["evaluate"])
+        self.routing_agent = ContextAgent(self.context["route"])
+        self.writer_agent = ContextAgent(self.context["writer"])
 
-        # Tool agents for specialized tasks
-        self.tool_agents: Dict[str, Any] = create_agents([
-            "data_loader_agent",
-            "data_analysis_agent",
-            "preprocessing_agent",
-            "model_training_agent",
-            "evaluation_agent",
-            "visualization_agent",
-        ], config)
-
-        # Workflow orchestration
-        self.flow = WorkflowOrchestrator(
-            engine=self.context,
-            agent_registry=manager_agents,
-            pipeline=self,
+        self.tool_agents: Dict[str, object] = create_agents(
+            [
+                "data_loader_agent",
+                "data_analysis_agent",
+                "preprocessing_agent",
+                "model_training_agent",
+                "evaluation_agent",
+                "visualization_agent",
+            ],
+            self.config,
         )
+        self.current_printer_group: Optional[str] = None
 
-        self.iteration_manager = IterationManager(
-            engine=self.context,
-            loop_condition=self._should_continue_loop,
-            pipeline=self,
-        )
-
-        # Optional report configuration
-        self.report_length: Optional[str] = None
-        self.report_instructions: Optional[str] = None
-
-    @property
-    def state(self) -> ConversationState:
-        return self.context.state
-
-    # ------------------------------------------------------------------
-    # Run entry point
-    # ------------------------------------------------------------------
     @auto_trace
-    async def run(self):
-        """Execute the data science pipeline using compositional workflow."""
+    async def run(self, input: Optional[str] = None):
         logger.info(f"Data path: {self.config.data_path}")
         logger.info(f"User prompt: {self.config.prompt}")
         self.iteration = 0
+        state = self.context.state
 
-        # Prepare the structured query and initialise state timing
-        query = self.prepare_query(
-            content=(
+        if input is None:
+            input = (
                 f"Task: {self.config.prompt}\n"
                 f"Dataset path: {self.config.data_path}\n"
                 "Provide a comprehensive data science workflow"
             )
-        )
-        self.state.set_query(query)
 
+        state.set_query(self.prepare_query(content=input))
         self.update_printer("research", "Executing research workflow...")
         self.start_time = time.time()
-        self.state.start_timer()
+        state.start_timer()
 
-        # Execute iterative workflow
-        while self.iteration_manager.should_continue():
-            iteration, iteration_group = self.iteration_manager.begin_iteration()
+        for agent in (self.observe_agent, self.evaluate_agent, self.routing_agent, self.writer_agent):
+            agent.bind(self)
 
-            # Step 1: Observe
-            await self.flow.run_iteration_step(
-                behavior_name="observe",
-                agent_name="observe_agent",
-                snapshot_builder=lambda ctx: ctx.snapshot("observe"),
-                output_handler=lambda ctx, result: ctx.apply_output("observe", result),
-                span_name="generate_observations",
-                span_type="function",
-                printer_key="observe",
-                printer_title="Observations",
-                printer_group_id=iteration_group,
+        loop_index = 0
+        while not state.complete and self._check_constraints():
+            iteration = self.context.begin_iteration()
+            loop_index = iteration.index
+            self.iteration = loop_index
+            iteration_group = f"iter-{iteration.index}"
+
+            self.start_group(
+                iteration_group,
+                title=f"Iteration {iteration.index}",
+                border_style="white",
+                iteration=iteration.index,
             )
 
-            # Step 2: Evaluate
-            await self.flow.run_iteration_step(
-                behavior_name="evaluate",
-                agent_name="evaluate_agent",
-                snapshot_builder=lambda ctx: ctx.snapshot("evaluate"),
-                output_handler=lambda ctx, result: ctx.apply_output("evaluate", result),
-                output_model=KnowledgeGapOutput,
-                span_name="evaluate_research_state",
-                span_type="function",
-                printer_key="evaluate",
-                printer_title="Evaluation",
-                printer_group_id=iteration_group,
-            )
+            self.current_printer_group = iteration_group
 
-            # Step 3: Route (conditional)
-            if not self.state.complete:
-                await self.flow.run_iteration_step(
-                    behavior_name="route",
-                    agent_name="routing_agent",
-                    snapshot_builder=lambda ctx: ctx.snapshot("route"),
-                    output_handler=lambda ctx, result: ctx.apply_output("route", result),
-                    output_model=AgentSelectionPlan,
-                    span_name="route_tasks",
-                    span_type="tool",
-                    printer_key="route",
-                    printer_title="Routing",
-                    printer_group_id=iteration_group,
-                )
+            observations = await self.observe_agent(input)
+            evaluations = await self.evaluate_agent(observations)
 
-            # Step 4: Execute tools (conditional)
-            if self._has_pending_tools():
-                await self._execute_tool_tasks(iteration_group)
+            route_plan = None
+            if not state.complete:
+                route_plan = await self.routing_agent(evaluations)
 
-            self.iteration_manager.end_iteration(iteration_group)
+            if not state.complete:
+                plan = state.current_iteration.route_plan
+                if not plan and isinstance(route_plan, AgentSelectionPlan):
+                    plan = route_plan
+                if plan and plan.tasks:
+                    await execute_tool_plan(
+                        pipeline=self,
+                        context=self.context,
+                        tool_agents=self.tool_agents,
+                        iteration_group=iteration_group,
+                    )
 
-            if self.state.complete:
+            self.context.mark_iteration_complete()
+            self.end_group(iteration_group, is_done=True)
+            self.current_printer_group = None
+
+            if state.complete:
                 break
 
-        # Final report generation
-        final_group = self.iteration_manager.start_final_group()
-        await self.flow.run_iteration_step(
-            behavior_name="writer",
-            agent_name="writer_agent",
-            snapshot_builder=lambda ctx: ctx.snapshot("writer"),
-            output_handler=lambda ctx, result: ctx.apply_output("writer", result),
-            span_name="writer_agent",
-            span_type="agent",
-            printer_key="writer",
-            printer_title="Writer",
-            printer_group_id=final_group,
+        final_group = "iter-final"
+        self.start_group(
+            final_group,
+            title="Final Report",
+            border_style="white",
         )
-        self.iteration_manager.end_final_group(final_group)
+        self.current_printer_group = final_group
+        await self.writer_agent(state.findings_text())
+        self.end_group(final_group, is_done=True)
+        self.current_printer_group = None
 
-        # Finalise persisted memory and artefacts
         self.update_printer("research", "Research workflow complete", is_done=True)
         logger.info("Research workflow completed")
 
-        if self.state.final_report:
-            await self._finalise_research(self.state.final_report)
-
-        return self.state.final_report
-
-    # ------------------------------------------------------------------
-    # Flow condition helpers
-    # ------------------------------------------------------------------
-    def _should_continue_loop(self, engine: ContextEngine) -> bool:
-        if engine.state.complete:
-            return False
-        return self._check_constraints()
-
-    def _has_pending_tools(self) -> bool:
-        state = self.state
-        if state.complete:
-            return False
-        iteration = state.current_iteration
-        return bool(iteration.route_plan and iteration.route_plan.tasks)
-
-    # ------------------------------------------------------------------
-    # Tool execution runner
-    # ------------------------------------------------------------------
-    async def _execute_tool_tasks(self, iteration_group: str) -> None:
-        state = self.state
-        iteration = state.current_iteration
-        plan = iteration.route_plan
-        if not plan or not plan.tasks:
-            return
-
-        iteration.tools.clear()
-        iteration.findings.clear()
-
-        async def _run_single(task: AgentTask) -> ToolExecutionResult:
-            agent = self.tool_agents.get(task.agent)
-            if agent is None:
-                output = ToolAgentOutput(
-                    output=f"No implementation found for agent {task.agent}",
-                    sources=[],
-                )
-                return ToolExecutionResult(task=task, output=output)
-
-            result = await self.agent_step(
-                agent=agent,
-                instructions=task.model_dump_json(),
-                span_name=task.agent,
-                span_type="tool",
-                output_model=ToolAgentOutput,
-                printer_key=f"tool:{task.agent}",
-                printer_title=f"Tool: {task.agent}",
-                printer_group_id=iteration_group,
+        if state.final_report:
+            timestamped_report = f"Experiment {self.experiment_id}\n\n{(state.final_report or '').strip()}"
+            global_memory.store(
+                key=f"report_{self.experiment_id}",
+                value=timestamped_report,
+                tags=["research_report"],
             )
+            self.update_printer("writer_agent", "Final report generated", is_done=True)
 
-            output = result
-            if isinstance(result, ToolAgentOutput):
-                output = result
-            elif hasattr(result, "final_output_as"):
-                output = result.final_output_as(ToolAgentOutput)
-            elif hasattr(result, "final_output"):
-                output = ToolAgentOutput(output=str(result.final_output), sources=[])
-            else:
-                output = ToolAgentOutput(output=str(result), sources=[])
-
-            return ToolExecutionResult(task=task, output=output)
-
-        tasks = [_run_single(task) for task in plan.tasks]
-        results = []
-        for coro in asyncio.as_completed(tasks):
-            result = await coro
-            printer_key = f"{iteration_group}:tool:{result.task.agent}"
-            self.update_printer(
-                key=printer_key,
-                message=f"Completed {result.task.agent}",
-                is_done=True,
-                group_id=iteration_group,
-            )
-            results.append(result)
-
-        for tool_result in results:
-            self.context.record_tool_execution(tool_result)
-            output_value = getattr(tool_result.output, "output", None)
-            if output_value:
-                self.context.add_finding(output_value)
-
-    # ------------------------------------------------------------------
-    # Finalisation helpers
-    # ------------------------------------------------------------------
-    async def _finalise_research(self, research_report: str) -> None:
-        timestamped_report = f"Experiment {self.experiment_id}\n\n{(research_report or '').strip()}"
-        global_memory.store(
-            key=f"report_{self.experiment_id}",
-            value=timestamped_report,
-            tags=["research_report"],
-        )
-        logger.info(f"Stored research report with experiment_id {self.experiment_id}")
-        self.update_printer("writer_agent", "Final report generated", is_done=True)
+        return state.final_report

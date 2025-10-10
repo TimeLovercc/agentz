@@ -62,7 +62,10 @@ class ContextEngine:
     def __init__(
         self,
         state: ConversationState,
-        behaviors: Optional[list[str]] = None
+        behaviors: Optional[list[str]] = None,
+        *,
+        config: Optional[Any] = None,
+        behavior_agents: Optional[Dict[str, str]] = None,
     ) -> None:
         """Initialize context engine with state and optional behaviors.
 
@@ -71,9 +74,13 @@ class ContextEngine:
             behaviors: Optional list of behavior names to auto-register.
                       If provided, will register input builders and output handlers
                       from behavior definitions.
+            config: Optional pipeline configuration for downstream agent creation
+            behavior_agents: Optional mapping of behavior key -> agent registry name
         """
         self._state = state
         self.registry = ContextRegistry()
+        self._config = config
+        self._behavior_agents = dict(behavior_agents or {})
 
         # Auto-register behaviors if provided
         if behaviors:
@@ -87,6 +94,17 @@ class ContextEngine:
     @property
     def state(self) -> ConversationState:
         return self._state
+
+    @property
+    def config(self) -> Optional[Any]:
+        return self._config
+
+    @property
+    def behavior_agents(self) -> Dict[str, str]:
+        return self._behavior_agents
+
+    def register_behavior_agent(self, behavior_key: str, agent_name: str) -> None:
+        self._behavior_agents[behavior_key] = agent_name
 
     # ------------------------------------------------------------------
     # Behavior rendering
@@ -126,6 +144,9 @@ class ContextEngine:
         if handler:
             handler(self._state, output)
 
+    def __getitem__(self, behavior_key: str) -> "BehaviorHandle":
+        return BehaviorHandle(engine=self, key=behavior_key)
+
     # ------------------------------------------------------------------
     # Conversation state helpers
     # ------------------------------------------------------------------
@@ -156,3 +177,36 @@ class ContextEngine:
     def set_final_report(self, report: str) -> None:
         """Set the final research report."""
         self._state.final_report = report
+
+
+@dataclass(frozen=True)
+class BehaviorHandle:
+    """Lightweight wrapper exposing behavior runtime utilities."""
+
+    engine: ContextEngine
+    key: str
+
+    @property
+    def agent_name(self) -> Optional[str]:
+        return self.engine.behavior_agents.get(self.key)
+
+    @property
+    def instructions(self) -> str:
+        return self.engine.behavior_instructions(self.key)
+
+    def render(self, payload: Union[BaseModel, Mapping[str, Any], None] = None) -> str:
+        return self.engine.render_behavior(self.key, payload)
+
+    def snapshot(self) -> Payload:
+        return self.engine.snapshot(self.key)
+
+    def apply_output(self, output: Any) -> None:
+        self.engine.apply_output(self.key, output)
+
+    @property
+    def state(self) -> ConversationState:
+        return self.engine.state
+
+    @property
+    def config(self) -> Optional[Any]:
+        return self.engine.config

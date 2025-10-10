@@ -12,8 +12,7 @@ Iteration Management:
 - IterationManager: Controls iteration lifecycle for iterative workflows
 
 Orchestration:
-- BehaviorExecutor: Executes behaviors with dynamic agent selection
-- WorkflowOrchestrator: High-level workflow orchestration
+- WorkflowOrchestrator: High-level workflow orchestration with behavior execution
 
 Decorators:
 - auto_trace: Wraps run methods with context management
@@ -37,7 +36,7 @@ from agentz.flow.context import (
 )
 from agentz.flow.executor import AgentExecutor, AgentStep, PrinterConfig
 from agentz.flow.iteration import IterationManager
-from agentz.flow.orchestration import BehaviorExecutor, WorkflowOrchestrator
+from agentz.flow.orchestration import WorkflowOrchestrator
 from agentz.flow.patterns import (
     ConditionalPattern,
     ExecutionPattern,
@@ -60,7 +59,6 @@ __all__ = [
     # Iteration
     "IterationManager",
     # Orchestration
-    "BehaviorExecutor",
     "WorkflowOrchestrator",
     # Decorators
     "auto_trace",
