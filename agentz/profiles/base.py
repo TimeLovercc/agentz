@@ -38,5 +38,36 @@ class Profile(BaseModel):
             )
 
         return self
-    
+
+
+def load_all_profiles():
+    """Load all Profile instances from the profiles package."""
+    import importlib
+    import inspect
+    from pathlib import Path
+
+    profiles = {}
+    package_path = Path(__file__).parent
+
+    # Recursively find all .py files in the profiles directory
+    for py_file in package_path.rglob('*.py'):
+        if py_file.name == 'base.py' or py_file.name.startswith('_'):
+            continue
+
+        # Convert file path to module name (need to find 'agentz' root)
+        # Go up from current file: profiles/base.py -> profiles -> agentz
+        agentz_root = package_path.parent
+        relative_path = py_file.relative_to(agentz_root)
+        module_name = 'agentz.' + str(relative_path.with_suffix('')).replace('/', '.')
+
+        try:
+            module = importlib.import_module(module_name)
+            for name, obj in inspect.getmembers(module):
+                if isinstance(obj, Profile) and not name.startswith('_'):
+                    profiles[name] = obj
+        except Exception:
+            pass
+
+    return profiles
+
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+
+
 import asyncio
 import time
 from dataclasses import dataclass
@@ -16,6 +18,8 @@ from agentz.context.engine import ContextEngine
 from agentz.context.global_memory import global_memory
 from agentz.flow import auto_trace
 from pipelines.base import BasePipeline
+from agentz.profiles.base import load_all_profiles
+
 
 
 @dataclass(frozen=True)
@@ -132,17 +136,17 @@ class DataScientistPipeline(BasePipeline):
     def __init__(self, config):
         super().__init__(config)
         
-        profiles = BehaviorProfiles()
+        profiles = load_all_profiles()
         states = ConversationState()
         self.context = ContextEngine(
             profiles = profiles,
             states = states,
         )
 
-        self.observe_agent = ContextAgent(profiles["observe"], llm = config.llm)
-        self.evaluate_agent = ContextAgent(profiles["evaluate"], llm = config.llm)
-        self.routing_agent = ContextAgent(profiles["route"], llm = config.llm)
-        self.writer_agent = ContextAgent(profiles["writer"], llm = config.llm)
+        self.observe_agent = ContextAgent(profiles["observe_profile"], llm = config.llm)
+        self.evaluate_agent = ContextAgent(profiles["evaluate_profile"], llm = config.llm)
+        self.routing_agent = ContextAgent(profiles["route_profile"], llm = config.llm)
+        self.writer_agent = ContextAgent(profiles["writer_profile"], llm = config.llm)
 
         self.tool_agents = ContextAgent(
             {
