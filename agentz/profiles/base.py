@@ -4,6 +4,12 @@ from typing import Optional, List, Type, Set
 from pydantic import BaseModel, Field, model_validator
 
 
+class ToolAgentOutput(BaseModel):
+    """Standard output for all tool agents"""
+    output: str
+    sources: list[str] = Field(default_factory=list)
+
+
 class Profile(BaseModel):
     instructions: str = Field(description="The agent's system prompt/instructions that define its behavior")
     runtime_template: str = Field(description="The runtime template for the agent's behavior")

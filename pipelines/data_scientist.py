@@ -8,11 +8,12 @@ from dataclasses import dataclass
 from typing import Dict, Optional
 
 from loguru import logger
+from pydantic import BaseModel
 
 from agentz.agent.agent_base import ContextAgent
-from agentz.profiles.manager.evaluate import KnowledgeGapOutput
+from agentz.profiles.manager.evaluate import EvaluateOutput
 from agentz.profiles.manager.routing import AgentSelectionPlan, AgentTask
-from agentz.agent.registry import ToolAgentOutput
+from agentz.profiles.base import ToolAgentOutput
 from agentz.context.conversation import ConversationState, ToolExecutionResult
 from agentz.context.engine import ContextEngine
 from agentz.context.global_memory import global_memory
@@ -20,45 +21,6 @@ from agentz.flow import auto_trace
 from pipelines.base import BasePipeline
 from agentz.profiles.base import load_all_profiles
 
-
-
-@dataclass(frozen=True)
-class BehaviorExecutionConfig:
-    span_name: str
-    span_type: str
-    printer_key: str
-    printer_title: str
-    output_model: Optional[type] = None
-
-
-BEHAVIOR_EXECUTION_CONFIGS: Dict[str, BehaviorExecutionConfig] = {
-    "observe": BehaviorExecutionConfig(
-        span_name="generate_observations",
-        span_type="function",
-        printer_key="observe",
-        printer_title="Observations",
-    ),
-    "evaluate": BehaviorExecutionConfig(
-        span_name="evaluate_research_state",
-        span_type="function",
-        printer_key="evaluate",
-        printer_title="Evaluation",
-        output_model=KnowledgeGapOutput,
-    ),
-    "route": BehaviorExecutionConfig(
-        span_name="route_tasks",
-        span_type="tool",
-        printer_key="route",
-        printer_title="Routing",
-        output_model=AgentSelectionPlan,
-    ),
-    "writer": BehaviorExecutionConfig(
-        span_name="writer_agent",
-        span_type="agent",
-        printer_key="writer",
-        printer_title="Writer",
-    ),
-}
 
 
 async def execute_tool_plan(
@@ -112,6 +74,11 @@ async def execute_tool_plan(
         else:
             output = ToolAgentOutput(output=str(raw_result), sources=[])
 
+        try:
+            context.state.record_payload(output)
+        except Exception as exc:
+            logger.debug(f"Failed to record tool payload for {task.agent}: {exc}")
+
         result = ToolExecutionResult(task=task, output=output)
         pipeline.update_printer(
             key=f"{iteration_group}:tool:{task.agent}",
@@ -137,10 +104,16 @@ class DataScientistPipeline(BasePipeline):
         super().__init__(config)
         
         profiles = load_all_profiles()
-        states = ConversationState()
+        output_models = [
+            profile.output_schema
+            for profile in profiles.values()
+            if getattr(profile, "output_schema", None)
+        ]
+        state = ConversationState(extra_output_models=output_models or None)
+
         self.context = ContextEngine(
-            profiles = profiles,
-            states = states,
+            state=state,
+            config=config,
         )
 
         self.observe_agent = ContextAgent(profiles["observe_profile"], llm = config.llm)
@@ -159,6 +132,13 @@ class DataScientistPipeline(BasePipeline):
                 "code_generation_agent": {"profile": "code_generation", "llm": config.llm},
             },
         )
+
+    def _record_structured_payload(self, value: object, *, context_label: str) -> None:
+        if isinstance(value, BaseModel):
+            try:
+                self.context.state.record_payload(value)
+            except Exception as exc:  # pragma: no cover - diagnostic-only
+                logger.debug(f"Failed to record payload for {context_label}: {exc}")
 
     @auto_trace
     async def run(self, query: Optional[str] = None):
@@ -197,11 +177,23 @@ class DataScientistPipeline(BasePipeline):
             self.current_printer_group = iteration_group
 
             observations = await self.observe_agent(input)
+            if isinstance(observations, BaseModel):
+                iteration.observation = observations.model_dump_json(indent=2)
+            elif isinstance(observations, str):
+                iteration.observation = observations
+            self._record_structured_payload(observations, context_label="observe_agent")
+
             evaluations = await self.evaluate_agent(observations)
+            if isinstance(evaluations, EvaluateOutput):
+                iteration.evaluation = evaluations
+            self._record_structured_payload(evaluations, context_label="evaluate_agent")
 
             route_plan = None
             if not state.complete:
                 route_plan = await self.routing_agent(evaluations)
+                if isinstance(route_plan, AgentSelectionPlan):
+                    iteration.route_plan = route_plan
+                self._record_structured_payload(route_plan, context_label="routing_agent")
 
             if not state.complete:
                 plan = state.current_iteration.route_plan

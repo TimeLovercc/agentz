@@ -5,7 +5,7 @@ from typing import Any, Dict
 from agentz.context.conversation import ConversationState
 from agentz.context.engine import ContextEngine
 from agentz.profiles.manager.memory import MemoryAgentOutput
-from agentz.profiles.manager.evaluate import KnowledgeGapOutput
+from agentz.profiles.manager.evaluate import EvaluateOutput
 from agentz.profiles.manager.routing import AgentSelectionPlan
 from agentz.agent.registry import create_agents
 from agentz.flow import auto_trace
@@ -120,7 +120,7 @@ class DataScientistMemoryPipeline(DataScientistPipeline):
                 agent_name="evaluate_agent",
                 snapshot_builder=lambda ctx: ctx.snapshot("evaluate"),
                 output_handler=lambda ctx, result: ctx.apply_output("evaluate", result),
-                output_model=KnowledgeGapOutput,
+                output_model=EvaluateOutput,
                 span_name="evaluate_research_state",
                 span_type="function",
                 printer_key="evaluate",

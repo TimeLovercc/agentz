@@ -22,7 +22,7 @@ EVALUATE_AGENT = Agent(
     name="Focused Evaluator",
     instructions=(
         "Review research progress with an emphasis on data readiness, model risk, and "
-        "missing validation steps. Respond using the KnowledgeGapOutput schema in JSON."
+        "missing validation steps. Respond using the EvaluateOutput schema in JSON."
     ),
 )
 

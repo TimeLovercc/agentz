@@ -2,18 +2,12 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from agentz.profiles.base import Profile
+from agentz.profiles.base import Profile, ToolAgentOutput
 
 
 class TaskInput(BaseModel):
     """Input schema for task-based runtime template."""
     task: str = Field(description="The task to perform")
-
-
-class ToolAgentOutput(BaseModel):
-    """Standard output for tool agents."""
-    output: str
-    sources: list[str] = Field(default_factory=list)
 
 
 # Profile instance for preprocessing agent

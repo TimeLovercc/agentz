@@ -6,12 +6,13 @@ import asyncio
 import inspect
 import importlib
 import pkgutil
-from pydantic import BaseModel, Field
 
 try:
     from agents import Agent
 except Exception as e:
     raise ImportError("Expected `from agents import Agent` to be importable") from e
+
+from agentz.profiles.base import ToolAgentOutput
 
 # Canonical name -> factory(config) -> Agent (sync or async)
 ALL_AGENT_FACTORIES: Dict[str, Callable[..., Any]] = {}
@@ -79,12 +80,6 @@ def _ensure_registry_populated(agent_name_hint: Optional[str] = None) -> None:
         _import_all_under_agents_root()
         _DISCOVERY_DONE = True
         logger.debug(f"Auto-discovered {len(ALL_AGENT_FACTORIES)} agent factories")
-
-
-class ToolAgentOutput(BaseModel):
-    """Standard output for all tool agents"""
-    output: str
-    sources: list[str] = Field(default_factory=list)
 
 
 def _canon(name: str) -> str:
