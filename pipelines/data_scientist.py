@@ -7,10 +7,10 @@ from typing import Dict, Optional
 
 from loguru import logger
 
-from agentz.profiles.agent_base import ContextAgent
+from agentz.agent.agent_base import ContextAgent
 from agentz.profiles.manager.evaluate import KnowledgeGapOutput
 from agentz.profiles.manager.routing import AgentSelectionPlan, AgentTask
-from agentz.profiles.registry import ToolAgentOutput, create_agents
+from agentz.agent.registry import ToolAgentOutput
 from agentz.context.conversation import ConversationState, ToolExecutionResult
 from agentz.context.engine import ContextEngine
 from agentz.context.global_memory import global_memory

@@ -1,61 +1,51 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import List
+from pydantic import BaseModel, Field
 
-from agentz.profiles.agent_base import ResearchAgent as Agent
-from agentz.profiles.registry import register_agent
-from agentz.configuration.base import BaseConfig, get_agent_spec
-from agentz.context.behavior_profiles import behavior_profiles
-from agentz.context.conversation import KnowledgeGapOutput
+from agentz.profiles.base import Profile
 
 
-@register_agent("evaluate_agent", aliases=["evaluate"])
-def create_evaluate_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
-    """Create an evaluation agent using OpenAI Agents SDK.
+class EvaluateInput(BaseModel):
+    """Input schema for evaluate agent runtime template."""
+    iteration: int = Field(description="Current iteration number")
+    elapsed_minutes: float = Field(description="Time elapsed in minutes")
+    max_minutes: float = Field(description="Maximum allowed minutes")
+    query: str = Field(description="Original user query")
+    history: str = Field(description="History of actions, findings and thoughts")
 
-    Args:
-        cfg: Base configuration
-        spec: Optional agent spec with {instructions, params}
 
-    Returns:
-        Agent instance configured for research evaluation
-    """
-    def _merge_spec(input_spec: Optional[dict]) -> dict:
-        if input_spec is None:
-            return get_agent_spec(cfg, "evaluate_agent")
+class EvaluateOutput(BaseModel):
+    """Output schema for evaluate agent."""
+    research_complete: bool = Field(description="Boolean indicating if research is done")
+    outstanding_gaps: List[str] = Field(description="List of specific gaps that still need addressing", default_factory=list)
+    reasoning: str = Field(description="Clear explanation of the evaluation")
 
-        merged = dict(input_spec)
-        profile_name = merged.get("profile") or "evaluate_agent"
-        profile = behavior_profiles.get_optional(profile_name)
 
-        params_override = merged.get("params")
-        if profile:
-            merged.setdefault("instructions", profile.instructions)
-            params_override = profile.params_with(params_override)
-            merged["profile"] = profile.name
-        else:
-            params_override = dict(params_override or {})
+# Profile instance for evaluate agent
+evaluate_profile = Profile(
+    instructions="""You are a research evaluation agent. Analyze research progress and determine if goals have been met.
 
-        if "instructions" not in merged:
-            fallback = get_agent_spec(cfg, "evaluate_agent", required=False)
-            if fallback:
-                merged["instructions"] = fallback["instructions"]
-                base_params = dict(fallback.get("params", {}))
-                base_params.update(params_override)
-                params_override = base_params
+Your responsibilities:
+1. Assess whether the research task has been completed
+2. Identify any remaining knowledge gaps
+3. Provide clear reasoning for your evaluation
+4. Suggest specific next steps if research is incomplete
 
-        if "instructions" not in merged:
-            raise ValueError("Evaluate agent requires instructions via profile or config.")
+Evaluate the research state and provide structured output with:
+- research_complete: boolean indicating if research is done
+- outstanding_gaps: list of specific gaps that still need addressing
+- reasoning: clear explanation of your evaluation""",
+    runtime_template="""Current Iteration Number: [[ITERATION]]
+Time Elapsed: [[ELAPSED_MINUTES]] minutes of maximum [[MAX_MINUTES]] minutes
 
-        merged["params"] = params_override
-        return merged
+ORIGINAL QUERY:
+[[QUERY]]
 
-    spec = _merge_spec(spec)
-
-    return Agent(
-        name="Research Evaluator",
-        instructions=spec["instructions"],
-        output_type=KnowledgeGapOutput,
-        model=cfg.llm.main_model,
-        **spec.get("params", {})
-    )
+HISTORY OF ACTIONS, FINDINGS AND THOUGHTS:
+[[HISTORY]]""",
+    output_schema=EvaluateOutput,
+    input_schema=EvaluateInput,
+    tools=None,
+    model=None
+)

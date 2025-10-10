@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, List, Optional
 
 from pydantic import BaseModel, Field
 
-from agentz.profiles.registry import ToolAgentOutput
+from agentz.agent.registry import ToolAgentOutput
 
 if TYPE_CHECKING:
     from agentz.profiles.manager.routing import AgentSelectionPlan, AgentTask

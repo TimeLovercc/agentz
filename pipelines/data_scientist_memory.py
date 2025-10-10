@@ -7,7 +7,7 @@ from agentz.context.engine import ContextEngine
 from agentz.profiles.manager.memory import MemoryAgentOutput
 from agentz.profiles.manager.evaluate import KnowledgeGapOutput
 from agentz.profiles.manager.routing import AgentSelectionPlan
-from agentz.profiles.registry import create_agents
+from agentz.agent.registry import create_agents
 from agentz.flow import auto_trace
 from pipelines.data_scientist import DataScientistPipeline
 

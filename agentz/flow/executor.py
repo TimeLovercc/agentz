@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional, Union
 
-from agentz.profiles.agent_base import ResearchRunner as Runner
+from agentz.agent.agent_base import ResearchRunner as Runner
 from agents.tracing.create import agent_span, function_span
 from pydantic import BaseModel
 

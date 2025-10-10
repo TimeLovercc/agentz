@@ -1,108 +1,62 @@
-# Memory_Compress_Prompt = """
-# You are an expert at analyzing conversation history and extracting relevant information. Your task is to thoroughly evaluate the conversation history and current question to provide a comprehensive summary that will help answer the question.
-
-# The last summary serves as your starting point, marking the information landscape previously collected. Your role is to:
-# - Analyze progress made since the last summary
-# - Identify remaining information gaps
-# - Generate a useful summary that combines previous and new information
-# - Maintain continuity, especially when recent conversation history is limited
-
-# Task Guidelines
-
-# 1. Information Analysis:
-#    - Carefully analyze the conversation history to identify truly useful information.
-#    - Focus on information that directly contributes to answering the question.
-#    - Do NOT make assumptions, guesses, or inferences beyond what is explicitly stated.
-#    - If information is missing or unclear, do NOT include it in your summary.
-#    - Use the last summary as a baseline when recent history is sparse.
-
-# 2. Summary Requirements:
-#    - Extract only the most relevant information that is explicitly present in the conversation.
-#    - Synthesize information from multiple exchanges when relevant.
-#    - Only include information that is certain and clearly stated.
-#    - Do NOT output or mention any information that is uncertain, insufficient, or cannot be confirmed.
-
-# 3. Output Format: Your response should be structured as follows:
-# <summary>
-# - Essential Information: [Organize the relevant and certain information from the conversation history that helps address the question.]
-# </summary>
-
-# Strictly avoid fabricating, inferring, or exaggerating any information not present in the conversation. Only output information that is certain and explicitly stated.
-
-# Question
-# {{{question}}}
-
-# Last Summary
-# {{{last_summary}}}
-
-# Conversation History
-# {{{recent_history_messages}}}
-
-# Please generate a comprehensive and useful summary. Note that you are not permitted to invoke tools during this process.
-# """
-
 from __future__ import annotations
 
-from typing import Optional
 from pydantic import BaseModel, Field
 
-from agentz.profiles.agent_base import ResearchAgent as Agent
-from agentz.configuration.base import BaseConfig, get_agent_spec
-from agentz.profiles.registry import register_agent
-from agentz.context.behavior_profiles import behavior_profiles
+from agentz.profiles.base import Profile
+
+
+class MemoryInput(BaseModel):
+    """Input schema for memory agent runtime template."""
+    iteration: int = Field(description="Current iteration number")
+    query: str = Field(description="Original user query")
+    last_summary: str = Field(description="Last generated summary")
+    conversation_history: str = Field(description="Recent conversation history")
 
 
 class MemoryAgentOutput(BaseModel):
-    """Plan containing multiple agent tasks to address knowledge gaps."""
+    """Output schema for memory agent."""
     summary: str = Field(description="Summary of the conversation history", default="")
 
-@register_agent("memory_agent", aliases=["memory"])
-def create_memory_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
-    """Create a memory agent using OpenAI Agents SDK.
 
-    Args:
-        cfg: Base configuration
-        spec: Optional agent spec with {instructions, params}
+# Profile instance for memory agent
+memory_profile = Profile(
+    instructions="""You are a memory agent. Your role is to store and retrieve information from the conversation history.
 
-    Returns:
-        Agent instance configured for memory
-    """
-    def _merge_spec(input_spec: Optional[dict]) -> dict:
-        if input_spec is None:
-            return get_agent_spec(cfg, "memory_agent")
+Your responsibilities:
+1. Thoroughly evaluate the conversation history and current question
+2. Provide a comprehensive summary that will help answer the question.
+3. Analyze progress made since the last summary
+4. Generate a useful summary that combines previous and new information
+5. Maintain continuity, especially when recent conversation history is limited
 
-        merged = dict(input_spec)
-        profile_name = merged.get("profile") or "memory_agent"
-        profile = behavior_profiles.get_optional(profile_name)
+Task Guidelines
 
-        params_override = merged.get("params")
-        if profile:
-            merged.setdefault("instructions", profile.instructions)
-            params_override = profile.params_with(params_override)
-            merged["profile"] = profile.name
-        else:
-            params_override = dict(params_override or {})
+1. Information Analysis:
+  - Carefully analyze the conversation history to identify truly useful information.
+  - Focus on information that directly contributes to answering the question.
+  - Do NOT make assumptions, guesses, or inferences beyond what is explicitly stated.
+  - If information is missing or unclear, do NOT include it in your summary.
+  - Use the last summary as a baseline when recent history is sparse.
 
-        if "instructions" not in merged:
-            fallback = get_agent_spec(cfg, "memory_agent", required=False)
-            if fallback:
-                merged["instructions"] = fallback["instructions"]
-                base_params = dict(fallback.get("params", {}))
-                base_params.update(params_override)
-                params_override = base_params
+2. Summary Requirements:
+  - Extract only the most relevant information that is explicitly present in the conversation.
+  - Synthesize information from multiple exchanges when relevant.
+  - Only include information that is certain and clearly stated.
+  - Do NOT output or mention any information that is uncertain, insufficient, or cannot be confirmed.
 
-        if "instructions" not in merged:
-            raise ValueError("Memory agent requires instructions via profile or config.")
+Strictly avoid fabricating, inferring, or exaggerating any information not present in the conversation. Only output information that is certain and explicitly stated.""",
+    runtime_template="""You are at the end of iteration [[ITERATION]]. You need to generate a comprehensive and useful summary.
 
-        merged["params"] = params_override
-        return merged
+ORIGINAL QUERY:
+[[QUERY]]
 
-    spec = _merge_spec(spec)
+LAST SUMMARY:
+[[LAST_SUMMARY]]
 
-    return Agent(
-        name="Memory Agent",
-        instructions=spec["instructions"],
-        model=cfg.llm.main_model,
-        output_type=MemoryAgentOutput,
-        **spec.get("params", {})
-    )
+CONVERSATION HISTORY:
+[[CONVERSATION_HISTORY]]""",
+    output_schema=MemoryAgentOutput,
+    input_schema=MemoryInput,
+    tools=None,
+    model=None
+)

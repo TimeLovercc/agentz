@@ -2,15 +2,15 @@ from __future__ import annotations
 
 from loguru import logger
 
-from agentz.profiles.registry import create_agents
+from agentz.agent.registry import create_agents
 from agentz.flow import auto_trace
 from agentz.context.behavior_profiles import runtime_prompts
 from pipelines.base import BasePipeline
-from agentz.profiles.registry import register_agent, ToolAgentOutput
+from agentz.agent.registry import register_agent, ToolAgentOutput
 from agentz.configuration.base import BaseConfig
 from agentz.llm.llm_setup import model_supports_json_and_tool_calls
 from agentz.utils import create_type_parser
-from agentz.profiles.agent_base import ResearchAgent as Agent
+from agentz.agent.agent_base import ResearchAgent as Agent
 from agents.mcp import MCPServer, MCPServerStdio, MCPServerSse
 
 

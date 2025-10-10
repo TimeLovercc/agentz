@@ -1,59 +1,48 @@
 from __future__ import annotations
 
-from typing import Optional
+from pydantic import BaseModel, Field
 
-from agentz.profiles.agent_base import ResearchAgent as Agent
-from agentz.configuration.base import BaseConfig, get_agent_spec
-from agentz.profiles.registry import register_agent
-from agentz.context.behavior_profiles import behavior_profiles
+from agentz.profiles.base import Profile
 
 
-@register_agent("observe_agent", aliases=["observe"])
-def create_observe_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
-    """Create an observation agent using OpenAI Agents SDK.
+class ObserveInput(BaseModel):
+    """Input schema for observe agent runtime template."""
+    iteration: int = Field(description="Current iteration number")
+    query: str = Field(description="Original user query")
+    history: str = Field(description="History of actions, findings and thoughts")
 
-    Args:
-        cfg: Base configuration
-        spec: Optional agent spec with {instructions, params}
 
-    Returns:
-        Agent instance configured for research observation
-    """
-    def _merge_spec(input_spec: Optional[dict]) -> dict:
-        if input_spec is None:
-            return get_agent_spec(cfg, "observe_agent")
+# Profile instance for observe agent
+observe_profile = Profile(
+    instructions="""You are a research observation agent. Your role is to analyze the current state of research and provide thoughtful observations.
 
-        merged = dict(input_spec)
-        profile_name = merged.get("profile") or "observe_agent"
-        profile = behavior_profiles.get_optional(profile_name)
+Your responsibilities:
+1. Reflect on the progress made so far
+2. Identify patterns and insights from previous iterations
+3. Consider what has been learned and what remains unclear
+4. Provide strategic thinking about next steps
+5. Generate actionable observations that guide the research process
 
-        params_override = merged.get("params")
-        if profile:
-            merged.setdefault("instructions", profile.instructions)
-            params_override = profile.params_with(params_override)
-            merged["profile"] = profile.name
-        else:
-            params_override = dict(params_override or {})
+Analyze the provided context including:
+- The original query/task
+- Current iteration number and time elapsed
+- Background context
+- Previous iterations, actions, findings, and thoughts
 
-        if "instructions" not in merged:
-            fallback = get_agent_spec(cfg, "observe_agent", required=False)
-            if fallback:
-                merged["instructions"] = fallback["instructions"]
-                base_params = dict(fallback.get("params", {}))
-                base_params.update(params_override)
-                params_override = base_params
+Provide concise but insightful observations that help guide the research process. Focus on:
+- What we've learned so far
+- What patterns are emerging
+- What areas need deeper investigation
+- Strategic recommendations for next steps""",
+    runtime_template="""You are starting iteration [[ITERATION]] of your research process.
 
-        if "instructions" not in merged:
-            raise ValueError("Observe agent requires instructions via profile or config.")
+ORIGINAL QUERY:
+[[QUERY]]
 
-        merged["params"] = params_override
-        return merged
-
-    spec = _merge_spec(spec)
-
-    return Agent(
-        name="Research Observer",
-        instructions=spec["instructions"],
-        model=cfg.llm.main_model,
-        **spec.get("params", {})
-    )
+HISTORY OF ACTIONS, FINDINGS AND THOUGHTS:
+[[HISTORY]]""",
+    output_schema=None,
+    input_schema=ObserveInput,
+    tools=None,
+    model=None
+)

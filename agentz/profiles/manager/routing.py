@@ -3,10 +3,7 @@ from __future__ import annotations
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
-from agentz.profiles.agent_base import ResearchAgent as Agent
-from agentz.configuration.base import BaseConfig, get_agent_spec
-from agentz.profiles.registry import register_agent
-from agentz.context.behavior_profiles import behavior_profiles
+from agentz.profiles.base import Profile
 
 
 class AgentTask(BaseModel):
@@ -23,53 +20,47 @@ class AgentSelectionPlan(BaseModel):
     reasoning: str = Field(description="Reasoning for the agent selection", default="")
 
 
-@register_agent("routing_agent", aliases=["routing"])
-def create_routing_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
-    """Create a routing agent using OpenAI Agents SDK.
+class RoutingInput(BaseModel):
+    """Input schema for routing agent runtime template."""
+    query: str = Field(description="Original user query")
+    gap: str = Field(description="Knowledge gap to address")
+    history: str = Field(description="History of actions, findings and thoughts")
 
-    Args:
-        cfg: Base configuration
-        spec: Optional agent spec with {instructions, params}
 
-    Returns:
-        Agent instance configured for task routing
-    """
-    def _merge_spec(input_spec: Optional[dict]) -> dict:
-        if input_spec is None:
-            return get_agent_spec(cfg, "routing_agent")
+# Profile instance for routing agent
+routing_profile = Profile(
+    instructions="""You are a task routing agent. Your role is to analyze knowledge gaps and route appropriate tasks to specialized agents.
 
-        merged = dict(input_spec)
-        profile_name = merged.get("profile") or "routing_agent"
-        profile = behavior_profiles.get_optional(profile_name)
+Available agents: data_loader_agent, data_analysis_agent, preprocessing_agent, model_training_agent, evaluation_agent, visualization_agent, code_generation_agent, research_agent
 
-        params_override = merged.get("params")
-        if profile:
-            merged.setdefault("instructions", profile.instructions)
-            params_override = profile.params_with(params_override)
-            merged["profile"] = profile.name
-        else:
-            params_override = dict(params_override or {})
+Agent capabilities:
+- data_loader_agent: Load and inspect datasets, understand data structure
+- data_analysis_agent: Perform exploratory data analysis, statistical analysis
+- preprocessing_agent: Clean data, handle missing values, feature engineering
+- model_training_agent: Train machine learning models, hyperparameter tuning
+- evaluation_agent: Evaluate model performance, generate metrics
+- visualization_agent: Create charts, plots, and visualizations
+- code_generation_agent: Generate code snippets and complete implementations
+- research_agent: Research methodologies, best practices, domain knowledge
 
-        if "instructions" not in merged:
-            fallback = get_agent_spec(cfg, "routing_agent", required=False)
-            if fallback:
-                merged["instructions"] = fallback["instructions"]
-                base_params = dict(fallback.get("params", {}))
-                base_params.update(params_override)
-                params_override = base_params
+Your task:
+1. Analyze the knowledge gap that needs to be addressed
+2. Select the most appropriate agent(s) to handle the gap
+3. Create specific, actionable tasks for each selected agent
+4. Ensure tasks are clear and focused
 
-        if "instructions" not in merged:
-            raise ValueError("Routing agent requires instructions via profile or config.")
+Create a routing plan with appropriate agents and tasks to address the knowledge gap.""",
+    runtime_template="""ORIGINAL QUERY:
+[[QUERY]]
 
-        merged["params"] = params_override
-        return merged
+KNOWLEDGE GAP TO ADDRESS:
+[[GAP]]
 
-    spec = _merge_spec(spec)
 
-    return Agent(
-        name="Task Router",
-        instructions=spec["instructions"],
-        output_type=AgentSelectionPlan,
-        model=cfg.llm.main_model,
-        **spec.get("params", {})
-    )
+HISTORY OF ACTIONS, FINDINGS AND THOUGHTS:
+[[HISTORY]]""",
+    output_schema=AgentSelectionPlan,
+    input_schema=RoutingInput,
+    tools=None,
+    model=None
+)

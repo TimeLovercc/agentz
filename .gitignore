@@ -218,3 +218,4 @@ data/
 .DS_Store
 
 tmp/
+!agentz/profiles/data/
