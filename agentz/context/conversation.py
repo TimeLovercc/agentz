@@ -1,22 +1,19 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Any, ClassVar, Iterable, List, Optional, Sequence, Set, Tuple, Type
+from typing import Any, ClassVar, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Type
 from pydantic import BaseModel, Field, PrivateAttr, ValidationError, create_model
 from loguru import logger
-from agentz.profiles.base import load_all_profiles, ToolAgentOutput
-
-if TYPE_CHECKING:
-    from agentz.profiles.manager.routing import AgentSelectionPlan, AgentTask
-    from agentz.profiles.manager.evaluate import EvaluateOutput
-else:
-    AgentSelectionPlan = AgentTask = Any
-    EvaluateOutput = Any
+from agentz.profiles.base import load_all_profiles, Profile, ToolAgentOutput
 
 
-def _collect_profile_output_models(extra_models: Optional[Sequence[Type[BaseModel]]]) -> List[Type[BaseModel]]:
+def _collect_profile_output_models(
+    extra_models: Optional[Sequence[Type[BaseModel]]] = None,
+    profiles: Optional[Dict[str, Profile]] = None,
+) -> List[Type[BaseModel]]:
     """Gather all declared output schemas from registered profiles."""
-    profiles = load_all_profiles()
+    if profiles is None:
+        profiles = load_all_profiles()
     models: List[Type[BaseModel]] = []
     seen: Set[str] = set()
 
@@ -85,9 +82,6 @@ class IterationRecordBase(BaseModel):
 
     index: int
     observation: Optional[str] = None
-    evaluation: Optional[EvaluateOutput] = None
-    selected_gap: Optional[str] = None
-    route_plan: Optional[AgentSelectionPlan] = None
     tools: List[ToolAgentOutput] = Field(default_factory=list)
     findings: List[str] = Field(default_factory=list)
     payloads: List[Any] = Field(default_factory=list)
@@ -112,23 +106,27 @@ class IterationRecordBase(BaseModel):
         if self.observation:
             lines.append(f"<thought>\n{self.observation}\n</thought>")
 
-        if self.selected_gap:
-            lines.append(f"<task>\nAddress this knowledge gap: {self.selected_gap}\n</task>")
+        # Render structured payloads generically
+        if self.payloads:
+            payload_lines = []
+            for payload in self.payloads:
+                if isinstance(payload, BaseModel):
+                    payload_lines.append(payload.model_dump_json(indent=2))
+                else:
+                    payload_lines.append(str(payload))
+            if payload_lines:
+                lines.append(f"<payloads>\n{chr(10).join(payload_lines)}\n</payloads>")
 
-        if self.route_plan and self.route_plan.tasks:
-            task_lines = []
-            for task in self.route_plan.tasks:
-                entity = task.entity_website or "null"
-                task_lines.append(f"[Agent] {task.agent} [Query] {task.query} [Entity] {entity}")
-            lines.append(
-                "<action>\nCalling the following tools to address the knowledge gap:\n"
-                + "\n".join(task_lines)
-                + "\n</action>"
-            )
-
+        # Render tool execution results
         if self.tools:
-            findings_text = "\n\n".join(result.as_history_block() for result in self.tools)
-            lines.append(f"<findings>\n{findings_text}\n</findings>")
+            tool_lines = []
+            for tool_output in self.tools:
+                if hasattr(tool_output, 'output'):
+                    tool_lines.append(tool_output.output)
+                else:
+                    tool_lines.append(str(tool_output))
+            if tool_lines:
+                lines.append(f"<findings>\n{chr(10).join(tool_lines)}\n</findings>")
         elif self.findings:
             findings_text = "\n\n".join(self.findings)
             lines.append(f"<findings>\n{findings_text}\n</findings>")
@@ -207,19 +205,20 @@ class ConversationState(BaseModel):
     def __init__(
         self,
         *,
+        profiles: Optional[Dict[str, Profile]] = None,
         extra_output_models: Optional[Sequence[Type[BaseModel]]] = None,
         custom_iteration_model: Optional[Type[BaseModel]] = None,
         **data: Any,
     ):
         super().__init__(**data)
         output_models = (
-            _collect_profile_output_models(extra_output_models)
-            if extra_output_models
+            _collect_profile_output_models(extra_output_models, profiles=profiles)
+            if extra_output_models or profiles
             else list(_DEFAULT_OUTPUT_MODELS)
         )
         iteration_model = (
             IterationRecord
-            if not extra_output_models and custom_iteration_model is None
+            if not extra_output_models and not profiles and custom_iteration_model is None
             else _build_iteration_record_model(output_models, custom_iteration_model)
         )
         object.__setattr__(self, "_output_models", tuple(output_models))

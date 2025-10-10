@@ -4,17 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass
 from typing import Dict, Optional
 
 from loguru import logger
 from pydantic import BaseModel
 
 from agentz.agent.agent_base import ContextAgent
-from agentz.profiles.manager.evaluate import EvaluateOutput
 from agentz.profiles.manager.routing import AgentSelectionPlan, AgentTask
 from agentz.profiles.base import ToolAgentOutput
-from agentz.context.conversation import ConversationState, ToolExecutionResult
+from agentz.context.conversation import ConversationState
 from agentz.context.engine import ContextEngine
 from agentz.context.global_memory import global_memory
 from agentz.flow import auto_trace
@@ -31,28 +29,32 @@ async def execute_tool_plan(
     iteration_group: str,
 ) -> None:
     state = context.state
-    plan = state.current_iteration.route_plan
+    # Retrieve route_plan from payloads
+    plan = None
+    for payload in state.current_iteration.payloads:
+        if isinstance(payload, AgentSelectionPlan):
+            plan = payload
+            break
     if not plan or not plan.tasks:
         return
 
     state.current_iteration.tools.clear()
     state.current_iteration.findings.clear()
 
-    async def run_single(task: AgentTask) -> ToolExecutionResult:
+    async def run_single(task: AgentTask) -> ToolAgentOutput:
         agent = tool_agents.get(task.agent)
         if agent is None:
             output = ToolAgentOutput(
                 output=f"No implementation found for agent {task.agent}",
                 sources=[],
             )
-            result = ToolExecutionResult(task=task, output=output)
             pipeline.update_printer(
                 key=f"{iteration_group}:tool:{task.agent}",
                 message=f"Completed {task.agent}",
                 is_done=True,
                 group_id=iteration_group,
             )
-            return result
+            return output
 
         raw_result = await pipeline.agent_step(
             agent=agent,
@@ -79,20 +81,19 @@ async def execute_tool_plan(
         except Exception as exc:
             logger.debug(f"Failed to record tool payload for {task.agent}: {exc}")
 
-        result = ToolExecutionResult(task=task, output=output)
         pipeline.update_printer(
             key=f"{iteration_group}:tool:{task.agent}",
             message=f"Completed {task.agent}",
             is_done=True,
             group_id=iteration_group,
         )
-        return result
+        return output
 
     coroutines = [run_single(task) for task in plan.tasks]
     for coro in asyncio.as_completed(coroutines):
-        tool_result = await coro
-        context.record_tool_execution(tool_result)
-        output_value = getattr(tool_result.output, "output", None)
+        tool_output = await coro
+        state.current_iteration.tools.append(tool_output)
+        output_value = getattr(tool_output, "output", None)
         if output_value:
             context.add_finding(output_value)
 
@@ -102,14 +103,9 @@ class DataScientistPipeline(BasePipeline):
 
     def __init__(self, config):
         super().__init__(config)
-        
+
         profiles = load_all_profiles()
-        output_models = [
-            profile.output_schema
-            for profile in profiles.values()
-            if getattr(profile, "output_schema", None)
-        ]
-        state = ConversationState(extra_output_models=output_models or None)
+        state = ConversationState(profiles=profiles)
 
         self.context = ContextEngine(
             state=state,
@@ -184,21 +180,24 @@ class DataScientistPipeline(BasePipeline):
             self._record_structured_payload(observations, context_label="observe_agent")
 
             evaluations = await self.evaluate_agent(observations)
-            if isinstance(evaluations, EvaluateOutput):
-                iteration.evaluation = evaluations
             self._record_structured_payload(evaluations, context_label="evaluate_agent")
 
             route_plan = None
             if not state.complete:
                 route_plan = await self.routing_agent(evaluations)
-                if isinstance(route_plan, AgentSelectionPlan):
-                    iteration.route_plan = route_plan
                 self._record_structured_payload(route_plan, context_label="routing_agent")
 
             if not state.complete:
-                plan = state.current_iteration.route_plan
-                if not plan and isinstance(route_plan, AgentSelectionPlan):
+                # Retrieve route_plan from payloads
+                plan = None
+                if isinstance(route_plan, AgentSelectionPlan):
                     plan = route_plan
+                elif route_plan:
+                    # Try to find AgentSelectionPlan in payloads
+                    for payload in state.current_iteration.payloads:
+                        if isinstance(payload, AgentSelectionPlan):
+                            plan = payload
+                            break
                 if plan and plan.tasks:
                     await execute_tool_plan(
                         pipeline=self,

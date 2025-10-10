@@ -6,7 +6,8 @@ from typing import Any, Dict, Mapping, Optional, Protocol, Union
 from pydantic import BaseModel
 
 from agentz.context.behavior_profiles import behavior_registry
-from agentz.context.conversation import ConversationState, IterationRecord, ToolExecutionResult
+from agentz.context.conversation import ConversationState, IterationRecord
+from agentz.profiles.base import ToolAgentOutput
 
 Payload = Dict[str, Any]
 
@@ -162,7 +163,7 @@ class ContextEngine:
         """Mark the entire research process as complete."""
         self._state.mark_research_complete()
 
-    def record_tool_execution(self, result: ToolExecutionResult) -> None:
+    def record_tool_execution(self, result: ToolAgentOutput) -> None:
         """Append a tool execution result to the current iteration."""
         self._state.current_iteration.tools.append(result)
 
