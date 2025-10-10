@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from agents import Agent, RunResult, Runner
 from agents.run_context import TContext
-from agentz.agents.registry import create_agents
+from agentz.profiles.registry import create_agents
 from agentz.context.engine import BehaviorHandle
 
 PromptBuilder = Callable[[Any, Any, "ResearchAgent"], str]

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from loguru import logger
 
-from agentz.agents.registry import create_agents
+from agentz.profiles.registry import create_agents
 from agentz.flow import auto_trace
 from agentz.context.behavior_profiles import runtime_prompts
 from pipelines.base import BasePipeline
-from agentz.agents.base import ResearchAgent as Agent
+from agentz.profiles.agent_base import ResearchAgent as Agent
 from agentz.mcp.manager import MCPManager, MCPServerSpec
 from agentz.mcp.patches import apply_browsermcp_close_patch
 

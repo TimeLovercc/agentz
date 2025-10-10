@@ -6,30 +6,20 @@ from typing import Optional
 
 # print("chrome_agent============")
 
-from agentz.agents.base import ResearchAgent as Agent
+from agentz.profiles.agent_base import ResearchAgent as Agent
 from agentz.tools.data_tools import load_dataset
-from agentz.agents.registry import register_agent, ToolAgentOutput
+from agentz.profiles.registry import register_agent, ToolAgentOutput
 from agentz.configuration.base import BaseConfig
 from agentz.llm.llm_setup import model_supports_json_and_tool_calls
 from agentz.utils import create_type_parser
 from agentz.mcp.servers.chrome_devtools.server import ChromeDevToolsMCP
-from agents.mcp import MCPServer, MCPServerStdio, MCPServerSse
-from agents import HostedMCPTool
-import asyncio
+from agents.mcp import MCPServer, MCPServerStdio
 from agentz.context.behavior_profiles import behavior_profiles
 
-async def get_notion_server():
-    async with MCPServerSse(
-        name = "Notion",
-        params = {
-            "url": "https://mcp.notion.com/mcp"
-        }
-    ) as server:
-        return server
 
-@register_agent("notion_agent", aliases=["notion"])
-def create_notion_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
-    """Create a notion agent using OpenAI Agents SDK.
+@register_agent("chrome_agent", aliases=["chrome"])
+def create_chrome_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
+    """Create a chrome agent using OpenAI Agents SDK.
 
     Args:
         cfg: Base configuration
@@ -40,10 +30,16 @@ def create_notion_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
     """
     selected_model = cfg.llm.main_model
     spec = spec or {}
-    server = get_notion_server()
+    # server = ChromeDevToolsMCP()
 
-    profile_name = spec.get("profile") or "notion"
-    profile = behavior_profiles.get_optional(profile_name) or behavior_profiles.get("notion")
+    server = MCPServerStdio(
+        cache_tools_list=True,  # Cache the tools list, for demonstration
+        params={"command": "npx", "args": ["-y", "chrome-devtools-mcp@latest"]},
+    )
+    server.connect()
+
+    profile_name = spec.get("profile") or "chrome"
+    profile = behavior_profiles.get_optional(profile_name) or behavior_profiles.get("chrome")
 
     instructions = spec.get("instructions", profile.render())
     agent_kwargs = profile.params_with(spec.get("params"))
@@ -51,8 +47,9 @@ def create_notion_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
         agent_kwargs.pop(reserved, None)
 
     return Agent(
-        name="Notion",
+        name="Chrome",
         instructions=instructions,
+        # tools=[chrome_devtools_mcp],
         mcp_servers=[server],
         model=selected_model,
         output_type=ToolAgentOutput if model_supports_json_and_tool_calls(selected_model) else None,

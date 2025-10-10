@@ -5,7 +5,7 @@ from loguru import logger
 
 from agents import Agent
 from agentz.configuration.base import BaseConfig, get_agent_spec
-from agentz.agents.registry import register_agent, ToolAgentOutput
+from agentz.profiles.registry import register_agent, ToolAgentOutput
 
 
 @register_agent("code_generation_agent", aliases=["code_generation", "codegen"])

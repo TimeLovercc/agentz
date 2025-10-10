@@ -31,9 +31,9 @@ def _try_import_module(mod: str) -> None:
 
 
 def _import_all_under_agents_root() -> None:
-    """Recursively import all submodules under agentz.agents."""
+    """Recursively import all submodules under agentz.profiles."""
     try:
-        pkg = importlib.import_module("agentz.agents")
+        pkg = importlib.import_module("agentz.profiles")
     except Exception:
         return
 
@@ -60,11 +60,13 @@ def _ensure_registry_populated(agent_name_hint: Optional[str] = None) -> None:
     if agent_name_hint:
         leaf = agent_name_hint.strip().lower()
         for mod in (
-            f"agentz.agents.{leaf}",
-            f"agentz.agents.{leaf}_agent",
-            f"agentz.agents.manager_agents.{leaf}",
-            f"agentz.agents.data_agents.{leaf}",
-            f"agentz.agents.mcp_agents.{leaf}",
+            f"agentz.profiles.{leaf}",
+            f"agentz.profiles.manager.{leaf}",
+            f"agentz.profiles.data.{leaf}",
+            f"agentz.profiles.worker.{leaf}",
+            f"agentz.profiles.mcp.{leaf}",
+            f"agentz.profiles.code.{leaf}",
+            f"agentz.profiles.web.{leaf}",
         ):
             _try_import_module(mod)
 
@@ -72,7 +74,7 @@ def _ensure_registry_populated(agent_name_hint: Optional[str] = None) -> None:
         if ALL_AGENT_FACTORIES.get(leaf):
             return
 
-    # 2) Full recursive import under agentz.agents (one-time)
+    # 2) Full recursive import under agentz.profiles (one-time)
     if not _DISCOVERY_DONE:
         _import_all_under_agents_root()
         _DISCOVERY_DONE = True

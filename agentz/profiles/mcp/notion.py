@@ -6,44 +6,44 @@ from typing import Optional
 
 # print("chrome_agent============")
 
-from agentz.agents.base import ResearchAgent as Agent
+from agentz.profiles.agent_base import ResearchAgent as Agent
 from agentz.tools.data_tools import load_dataset
-from agentz.agents.registry import register_agent, ToolAgentOutput
+from agentz.profiles.registry import register_agent, ToolAgentOutput
 from agentz.configuration.base import BaseConfig
 from agentz.llm.llm_setup import model_supports_json_and_tool_calls
 from agentz.utils import create_type_parser
+from agentz.mcp.servers.chrome_devtools.server import ChromeDevToolsMCP
 from agents.mcp import MCPServer, MCPServerStdio, MCPServerSse
 from agents import HostedMCPTool
 import asyncio
 from agentz.context.behavior_profiles import behavior_profiles
 
-async def get_browser_server():
-    async with MCPServerStdio(
-        name = "Browser",
+async def get_notion_server():
+    async with MCPServerSse(
+        name = "Notion",
         params = {
-            "command": "npx",
-            "args": ["-y", "@browsermcp/mcp@latest"]
+            "url": "https://mcp.notion.com/mcp"
         }
     ) as server:
         return server
 
-@register_agent("browser_agent", aliases=["browser"])
-def create_browser_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
-    """Create a browser agent using OpenAI Agents SDK.
+@register_agent("notion_agent", aliases=["notion"])
+def create_notion_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
+    """Create a notion agent using OpenAI Agents SDK.
 
     Args:
         cfg: Base configuration
         spec: Optional agent spec with {instructions, params}
 
     Returns:
-        Agent instance configured for browser tasks
+        Agent instance configured for chrome tasks
     """
     selected_model = cfg.llm.main_model
     spec = spec or {}
-    server = get_browser_server()
+    server = get_notion_server()
 
-    profile_name = spec.get("profile") or "browser"
-    profile = behavior_profiles.get_optional(profile_name) or behavior_profiles.get("browser")
+    profile_name = spec.get("profile") or "notion"
+    profile = behavior_profiles.get_optional(profile_name) or behavior_profiles.get("notion")
 
     instructions = spec.get("instructions", profile.render())
     agent_kwargs = profile.params_with(spec.get("params"))
@@ -51,7 +51,7 @@ def create_browser_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
         agent_kwargs.pop(reserved, None)
 
     return Agent(
-        name="Browser",
+        name="Notion",
         instructions=instructions,
         mcp_servers=[server],
         model=selected_model,

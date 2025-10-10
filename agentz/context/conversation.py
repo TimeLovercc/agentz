@@ -5,10 +5,10 @@ from typing import TYPE_CHECKING, Any, List, Optional
 
 from pydantic import BaseModel, Field
 
-from agentz.agents.registry import ToolAgentOutput
+from agentz.profiles.registry import ToolAgentOutput
 
 if TYPE_CHECKING:
-    from agentz.agents.manager_agents.routing_agent import AgentSelectionPlan, AgentTask
+    from agentz.profiles.manager.routing import AgentSelectionPlan, AgentTask
 else:
     AgentSelectionPlan = AgentTask = Any
 

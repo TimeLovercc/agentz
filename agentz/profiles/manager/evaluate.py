@@ -2,29 +2,30 @@ from __future__ import annotations
 
 from typing import Optional
 
-from agentz.agents.base import ResearchAgent as Agent
+from agentz.profiles.agent_base import ResearchAgent as Agent
+from agentz.profiles.registry import register_agent
 from agentz.configuration.base import BaseConfig, get_agent_spec
-from agentz.agents.registry import register_agent
 from agentz.context.behavior_profiles import behavior_profiles
+from agentz.context.conversation import KnowledgeGapOutput
 
 
-@register_agent("writer_agent", aliases=["writer"])
-def create_writer_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
-    """Create a writer agent using OpenAI Agents SDK.
+@register_agent("evaluate_agent", aliases=["evaluate"])
+def create_evaluate_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
+    """Create an evaluation agent using OpenAI Agents SDK.
 
     Args:
         cfg: Base configuration
         spec: Optional agent spec with {instructions, params}
 
     Returns:
-        Agent instance configured for technical writing
+        Agent instance configured for research evaluation
     """
     def _merge_spec(input_spec: Optional[dict]) -> dict:
         if input_spec is None:
-            return get_agent_spec(cfg, "writer_agent")
+            return get_agent_spec(cfg, "evaluate_agent")
 
         merged = dict(input_spec)
-        profile_name = merged.get("profile") or "writer_agent"
+        profile_name = merged.get("profile") or "evaluate_agent"
         profile = behavior_profiles.get_optional(profile_name)
 
         params_override = merged.get("params")
@@ -36,7 +37,7 @@ def create_writer_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
             params_override = dict(params_override or {})
 
         if "instructions" not in merged:
-            fallback = get_agent_spec(cfg, "writer_agent", required=False)
+            fallback = get_agent_spec(cfg, "evaluate_agent", required=False)
             if fallback:
                 merged["instructions"] = fallback["instructions"]
                 base_params = dict(fallback.get("params", {}))
@@ -44,7 +45,7 @@ def create_writer_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
                 params_override = base_params
 
         if "instructions" not in merged:
-            raise ValueError("Writer agent requires instructions via profile or config.")
+            raise ValueError("Evaluate agent requires instructions via profile or config.")
 
         merged["params"] = params_override
         return merged
@@ -52,8 +53,9 @@ def create_writer_agent(cfg: BaseConfig, spec: Optional[dict] = None) -> Agent:
     spec = _merge_spec(spec)
 
     return Agent(
-        name="Technical Writer",
+        name="Research Evaluator",
         instructions=spec["instructions"],
+        output_type=KnowledgeGapOutput,
         model=cfg.llm.main_model,
         **spec.get("params", {})
     )

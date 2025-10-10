@@ -8,7 +8,7 @@ from loguru import logger
 from rich.console import Console
 
 from agents.tracing.create import function_span
-from agentz.agents.registry import AgentStore, set_current_pipeline_store
+from agentz.profiles.registry import AgentStore, set_current_pipeline_store
 from agentz.configuration.base import BaseConfig, resolve_config
 from agentz.flow import (
     AgentExecutor,

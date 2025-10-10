@@ -7,10 +7,10 @@ from typing import Dict, Optional
 
 from loguru import logger
 
-from agentz.agents.base import ContextAgent
-from agentz.agents.manager_agents.evaluate_agent import KnowledgeGapOutput
-from agentz.agents.manager_agents.routing_agent import AgentSelectionPlan, AgentTask
-from agentz.agents.registry import ToolAgentOutput, create_agents
+from agentz.profiles.agent_base import ContextAgent
+from agentz.profiles.manager.evaluate import KnowledgeGapOutput
+from agentz.profiles.manager.routing import AgentSelectionPlan, AgentTask
+from agentz.profiles.registry import ToolAgentOutput, create_agents
 from agentz.context.conversation import ConversationState, ToolExecutionResult
 from agentz.context.engine import ContextEngine
 from agentz.context.global_memory import global_memory
@@ -131,60 +131,47 @@ class DataScientistPipeline(BasePipeline):
 
     def __init__(self, config):
         super().__init__(config)
-
+        
+        profiles = BehaviorProfiles()
+        states = ConversationState()
         self.context = ContextEngine(
-            state=ConversationState(
-                query="",
-                data_path=self.config.data_path,
-                max_iterations=self.max_iterations,
-                max_minutes=self.max_time_minutes,
-            ),
-            behaviors=["observe", "evaluate", "route", "writer"],
-            config=self.config,
-            behavior_agents={
-                "observe": "observe_agent",
-                "evaluate": "evaluate_agent",
-                "route": "routing_agent",
-                "writer": "writer_agent",
+            profiles = profiles,
+            states = states,
+        )
+
+        self.observe_agent = ContextAgent(profiles["observe"], llm = config.llm)
+        self.evaluate_agent = ContextAgent(profiles["evaluate"], llm = config.llm)
+        self.routing_agent = ContextAgent(profiles["route"], llm = config.llm)
+        self.writer_agent = ContextAgent(profiles["writer"], llm = config.llm)
+
+        self.tool_agents = ContextAgent(
+            {
+                "data_loader_agent": {"profile": "data_loader", "llm": config.llm},
+                "data_analysis_agent": {"profile": "data_analysis", "llm": config.llm},
+                "preprocessing_agent": {"profile": "preprocessing", "llm": config.llm},
+                "model_training_agent": {"profile": "model_training", "llm": config.llm},
+                "evaluation_agent": {"profile": "evaluation", "llm": config.llm},
+                "visualization_agent": {"profile": "visualization", "llm": config.llm},
+                "code_generation_agent": {"profile": "code_generation", "llm": config.llm},
             },
         )
 
-        self.observe_agent = ContextAgent(self.context["observe"])
-        self.evaluate_agent = ContextAgent(self.context["evaluate"])
-        self.routing_agent = ContextAgent(self.context["route"])
-        self.writer_agent = ContextAgent(self.context["writer"])
-
-        self.tool_agents: Dict[str, object] = create_agents(
-            [
-                "data_loader_agent",
-                "data_analysis_agent",
-                "preprocessing_agent",
-                "model_training_agent",
-                "evaluation_agent",
-                "visualization_agent",
-            ],
-            self.config,
-        )
-        self.current_printer_group: Optional[str] = None
-
     @auto_trace
-    async def run(self, input: Optional[str] = None):
-        logger.info(f"Data path: {self.config.data_path}")
-        logger.info(f"User prompt: {self.config.prompt}")
+    async def run(self, query: Optional[str] = None):
+        logger.info(f"Data path: {query.data_path}")
+        logger.info(f"User prompt: {query.prompt}")
         self.iteration = 0
         state = self.context.state
 
-        if input is None:
-            input = (
-                f"Task: {self.config.prompt}\n"
-                f"Dataset path: {self.config.data_path}\n"
-                "Provide a comprehensive data science workflow"
-            )
-
-        state.set_query(self.prepare_query(content=input))
+        formatted_query = (
+            f"Task: {query.prompt}\n"
+            f"Dataset path: {query.data_path}\n"
+            "Provide a comprehensive data science workflow"
+        )
+        self.context.state.set_query(formatted_query)
         self.update_printer("research", "Executing research workflow...")
         self.start_time = time.time()
-        state.start_timer()
+        self.context.state.start_timer()
 
         for agent in (self.observe_agent, self.evaluate_agent, self.routing_agent, self.writer_agent):
             agent.bind(self)
