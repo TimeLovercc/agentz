@@ -1,6 +1,7 @@
 from __future__ import annotations
-from typing import Optional, List, Type
-from pydantic import BaseModel, Field
+import re
+from typing import Optional, List, Type, Set
+from pydantic import BaseModel, Field, model_validator
 
 
 class Profile(BaseModel):
@@ -13,5 +14,29 @@ class Profile(BaseModel):
 
     class Config:
         arbitrary_types_allowed = True
+
+    @model_validator(mode='after')
+    def validate_runtime_template_placeholders(self) -> 'Profile':
+        """Validate that all placeholders in runtime_template match fields in input_schema."""
+        if not self.runtime_template or not self.input_schema:
+            return self
+
+        # Extract placeholders from runtime_template (format: [[FIELD_NAME]])
+        placeholder_pattern = r'\[\[([A-Z_]+)\]\]'
+        placeholders: Set[str] = set(re.findall(placeholder_pattern, self.runtime_template))
+
+        # Get field names from input_schema and convert to uppercase
+        schema_fields: Set[str] = {field_name.upper() for field_name in self.input_schema.model_fields.keys()}
+
+        # Check for mismatches
+        missing_in_schema = placeholders - schema_fields
+
+        if missing_in_schema:
+            raise ValueError(
+                f"Runtime template contains placeholders that don't match input_schema fields: "
+                f"{missing_in_schema}. Available fields in input_schema (uppercase): {schema_fields}"
+            )
+
+        return self
     
 
