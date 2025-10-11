@@ -392,6 +392,7 @@ class BasePipeline:
         """Context manager for run lifecycle handling.
 
         Manages trace context initialization, printer lifecycle, and cleanup.
+        Automatically starts the pipeline timer for constraint checking.
 
         Args:
             additional_logging: Optional callable for pipeline-specific logging
@@ -399,6 +400,9 @@ class BasePipeline:
         Yields:
             Trace context for the workflow
         """
+        # Start pipeline timer for constraint checking
+        self.start_time = time.time()
+
         trace_ctx = self._initialize_run(additional_logging)
         try:
             with trace_ctx:

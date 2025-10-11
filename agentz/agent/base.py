@@ -8,10 +8,10 @@ from pydantic import BaseModel
 from agents import Agent, RunResult, Runner
 from agents.run_context import TContext
 
-PromptBuilder = Callable[[Any, Any, "ResearchAgent"], str]
+PromptBuilder = Callable[[Any, Any, "ContextAgent"], str]
 
 
-class ResearchAgent(Agent[TContext]):
+class ContextAgent(Agent[TContext]):
     """Capability-centric wrapper that binds LLM + tools + typed IO contract."""
 
     def __init__(
@@ -36,6 +36,40 @@ class ResearchAgent(Agent[TContext]):
         self.prompt_builder = prompt_builder
         self.default_span_type = default_span_type
         self.output_parser = output_parser
+
+    @classmethod
+    def from_profile(cls, profile: Any, llm: str) -> "ContextAgent":
+        """Create a ContextAgent from a Profile instance.
+
+        Automatically derives agent name from the profile's _key attribute.
+        Example: profiles["observe"] has _key="observe" → agent name becomes "observe_agent"
+
+        Args:
+            profile: Profile instance with instructions, schemas, tools (from profiles dict)
+            llm: LLM model name (e.g., "gpt-4", "claude-3-5-sonnet")
+
+        Returns:
+            ContextAgent instance configured from the profile
+
+        Example:
+            agent = ContextAgent.from_profile(profiles["observe"], "gpt-4")
+            # Creates agent with name="observe_agent"
+        """
+        # Auto-derive name from profile key
+        profile_key = getattr(profile, "_key", "agent")
+        agent_name = profile_key + "_agent" if profile_key != "agent" else "agent"
+
+        # Get tools, default to empty list if None
+        tools = getattr(profile, "tools", None) or []
+
+        return cls(
+            name=agent_name,
+            instructions=profile.instructions,
+            output_model=getattr(profile, "output_schema", None),
+            input_model=getattr(profile, "input_schema", None),
+            tools=tools,
+            model=llm,
+        )
 
     @staticmethod
     def _coerce_output_model(candidate: Any) -> type[BaseModel] | None:
@@ -136,14 +170,14 @@ class ResearchAgent(Agent[TContext]):
         return run_result
 
 
-class ResearchRunner(Runner):
-    """Runner shim that invokes ResearchAgent.parse_output after execution."""
+class ContextRunner(Runner):
+    """Runner shim that invokes ContextAgent.parse_output after execution."""
 
     @classmethod
     async def run(cls, *args: Any, **kwargs: Any) -> RunResult:
         result = await Runner.run(*args, **kwargs)
         starting_agent = kwargs.get("starting_agent") or (args[0] if args else None)
 
-        if isinstance(starting_agent, ResearchAgent):
+        if isinstance(starting_agent, ContextAgent):
             return await starting_agent.parse_output(result)
         return result

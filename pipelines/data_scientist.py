@@ -9,15 +9,13 @@ from typing import Dict, Optional
 from loguru import logger
 from pydantic import BaseModel
 
-from agentz.agent.registry import create_agents
+from agentz.agent.base import ContextAgent
 from agentz.profiles.manager.routing import AgentSelectionPlan, AgentTask
 from agentz.profiles.base import ToolAgentOutput
-from agentz.context.conversation import create_conversation_state
 from agentz.context.context import Context
 from agentz.context.global_memory import global_memory
 from agentz.flow import auto_trace
 from pipelines.base import BasePipeline
-from agentz.profiles.base import load_all_profiles
 
 
 
@@ -100,25 +98,31 @@ class DataScientistPipeline(BasePipeline):
     def __init__(self, config):
         super().__init__(config)
 
-        profiles = load_all_profiles()
-        state = create_conversation_state(profiles=profiles)
-        self.context = Context(state=state)
+        self.context = Context(["profiles", "states"])
+        profiles = self.context.profiles
+        llm = config.llm.main_model
 
-        # Create agents using registry
-        self.observe_agent = create_agents("observe_agent", config)
-        self.evaluate_agent = create_agents("evaluate_agent", config)
-        self.routing_agent = create_agents("routing_agent", config)
-        self.writer_agent = create_agents("writer_agent", config)
+        # Create manager agents from profiles dict (name auto-derived from key)
+        self.observe_agent = ContextAgent.from_profile(profiles["observe"], llm)
+        self.evaluate_agent = ContextAgent.from_profile(profiles["evaluate"], llm)
+        self.routing_agent = ContextAgent.from_profile(profiles["routing"], llm)
+        self.writer_agent = ContextAgent.from_profile(profiles["writer"], llm)
 
-        self.tool_agents = create_agents([
-            "data_loader_agent",
-            "data_analysis_agent",
-            "preprocessing_agent",
-            "model_training_agent",
-            "evaluation_agent",
-            "visualization_agent",
-            "code_generation_agent",
-        ], config)
+        # Define tool agent names
+        tool_agent_names = [
+            "data_loader",
+            "data_analysis",
+            "preprocessing",
+            "model_training",
+            "evaluation",
+            "visualization",
+        ]
+
+        # Load all tool agents from profiles
+        self.tool_agents = {
+            f"{name}_agent": ContextAgent.from_profile(profiles[name], llm)
+            for name in tool_agent_names
+        }
 
     def _record_structured_payload(self, value: object, *, context_label: str) -> None:
         if isinstance(value, BaseModel):
@@ -129,10 +133,7 @@ class DataScientistPipeline(BasePipeline):
 
     @auto_trace
     async def run(self, query: Optional[str] = None):
-        logger.info(f"Data path: {query.data_path}")
-        logger.info(f"User prompt: {query.prompt}")
         self.iteration = 0
-        state = self.context.state
 
         formatted_query = (
             f"Task: {query.prompt}\n"
@@ -141,11 +142,9 @@ class DataScientistPipeline(BasePipeline):
         )
         self.context.state.set_query(formatted_query)
         self.update_printer("research", "Executing research workflow...")
-        self.start_time = time.time()
-        self.context.state.start_timer()
 
         loop_index = 0
-        while not state.complete and self._check_constraints():
+        while not self.context.state.complete and self._check_constraints():
             iteration = self.context.begin_iteration()
             loop_index = iteration.index
             self.iteration = loop_index

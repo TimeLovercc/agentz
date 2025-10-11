@@ -94,8 +94,6 @@ class DataScientistMemoryPipeline(DataScientistPipeline):
         self.state.set_query(query)
 
         self.update_printer("research", "Executing research workflow...")
-        self.start_time = time.time()
-        self.state.start_timer()
 
         # Execute iterative workflow with memory compression
         while self.iteration_manager.should_continue():

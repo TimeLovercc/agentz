@@ -6,7 +6,7 @@ from agentz.agent.registry import create_agents
 from agentz.flow import auto_trace
 from agentz.context.behavior_profiles import runtime_prompts
 from pipelines.base import BasePipeline
-from agentz.agent.agent_base import ResearchAgent as Agent
+from agentz.agent.base import ContextAgent as Agent
 from agentz.mcp.manager import MCPManager, MCPServerSpec
 from agentz.mcp.patches import apply_browsermcp_close_patch
 

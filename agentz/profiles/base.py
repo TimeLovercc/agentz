@@ -47,7 +47,12 @@ class Profile(BaseModel):
 
 
 def load_all_profiles():
-    """Load all Profile instances from the profiles package."""
+    """Load all Profile instances from the profiles package.
+
+    Returns:
+        Dict with shortened keys (e.g., "observe" instead of "observe_profile")
+        Each profile has a _key attribute added for automatic name derivation
+    """
     import importlib
     import inspect
     from pathlib import Path
@@ -70,7 +75,11 @@ def load_all_profiles():
             module = importlib.import_module(module_name)
             for name, obj in inspect.getmembers(module):
                 if isinstance(obj, Profile) and not name.startswith('_'):
-                    profiles[name] = obj
+                    # Strip "_profile" suffix from key for cleaner access
+                    key = name.replace('_profile', '') if name.endswith('_profile') else name
+                    # Add _key attribute to profile for automatic name derivation
+                    obj._key = key
+                    profiles[key] = obj
         except Exception:
             pass
 
