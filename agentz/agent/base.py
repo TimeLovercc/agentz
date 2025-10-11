@@ -77,7 +77,7 @@ class ContextAgent(Agent[TContext]):
             return candidate
         return None
 
-    def _coerce_input(self, payload: Any) -> Any:
+    def _coerce_input(self, payload: Any, strict: bool = True) -> Any:
         if self.input_model is None or payload is None:
             return payload
         if isinstance(payload, self.input_model):
@@ -86,6 +86,11 @@ class ContextAgent(Agent[TContext]):
             return self.input_model.model_validate(payload.model_dump())
         if isinstance(payload, dict):
             return self.input_model.model_validate(payload)
+
+        # If strict mode is disabled, allow passthrough
+        if not strict:
+            return payload
+
         msg = f"{self.name} expects input compatible with {self.input_model.__name__}"
         raise TypeError(msg)
 
@@ -162,6 +167,45 @@ class ContextAgent(Agent[TContext]):
             printer_border_style=printer_border_style,
             **span_kwargs,
         )
+
+    async def __call__(self, payload: Any = None) -> Any:
+        """Make ContextAgent callable directly.
+
+        This allows usage like: result = await agent(input_data)
+        Directly runs the agent using the underlying Runner.
+
+        Note: When calling directly without pipeline context, input validation
+        is relaxed to allow string inputs even if agent has a defined input_model.
+
+        Args:
+            payload: Input data for the agent
+
+        Returns:
+            RunResult from agent execution
+        """
+        # Build prompt with non-strict input coercion
+        # This allows string inputs to pass through without validation errors
+        validated = self._coerce_input(payload, strict=False)
+
+        if isinstance(validated, str):
+            instructions = validated
+        elif isinstance(validated, BaseModel):
+            instructions = validated.model_dump_json(indent=2)
+        elif isinstance(validated, dict):
+            import json
+            instructions = json.dumps(validated, indent=2)
+        elif validated is None and isinstance(self.instructions, str):
+            instructions = self.instructions
+        else:
+            instructions = str(validated)
+
+        # Use ContextRunner to execute the agent
+        result = await ContextRunner.run(
+            starting_agent=self,
+            input=instructions,
+        )
+
+        return result
 
     async def parse_output(self, run_result: RunResult) -> RunResult:
         """Apply legacy string parser only when no structured output is configured."""
