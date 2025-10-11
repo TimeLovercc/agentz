@@ -10,7 +10,6 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field
 
 from agentz.utils import load_config
-from agentz.context.behavior_profiles import behavior_profiles
 
 
 class BaseConfig(BaseModel):
@@ -289,34 +288,12 @@ def get_agent_spec(cfg: BaseConfig, name: str, required: bool = True) -> Optiona
     params_override = dict(spec.get("params", {}))
 
     profile_name = spec.get("profile")
-    profile_used: Optional[str] = None
-
-    candidate_profiles = []
-    if profile_name:
-        candidate_profiles.append(profile_name)
-    candidate_profiles.append(name)
-
-    if instructions is None:
-        for candidate in candidate_profiles:
-            profile = behavior_profiles.get_optional(candidate)
-            if profile:
-                instructions = profile.instructions
-                params_override = profile.params_with(params_override)
-                profile_used = profile.name
-                break
-    else:
-        for candidate in candidate_profiles:
-            profile = behavior_profiles.get_optional(candidate)
-            if profile:
-                params_override = profile.params_with(params_override)
-                profile_used = profile.name
-                break
 
     if instructions is None:
         if required:
             available = sorted(idx.keys())
             raise ValueError(
-                f"Agent '{name}' has no instructions in config and no behavior profile found. "
+                f"Agent '{name}' has no instructions in config. "
                 f"Configured agents: {available}."
             )
         return None
@@ -325,9 +302,7 @@ def get_agent_spec(cfg: BaseConfig, name: str, required: bool = True) -> Optiona
         "instructions": instructions,
         "params": params_override,
     }
-    if profile_used:
-        result["profile"] = profile_used
-    elif profile_name:
+    if profile_name:
         result["profile"] = profile_name
 
     return result

@@ -3,8 +3,7 @@ from __future__ import annotations
 
 
 import asyncio
-import time
-from typing import Dict, Optional
+from typing import Dict
 
 from loguru import logger
 from pydantic import BaseModel
@@ -16,6 +15,12 @@ from agentz.context.context import Context
 from agentz.context.global_memory import global_memory
 from agentz.flow import auto_trace
 from pipelines.base import BasePipeline
+
+
+class DataScienceQuery(BaseModel):
+    """Query model for data science tasks."""
+    prompt: str
+    data_path: str
 
 
 
@@ -100,7 +105,7 @@ class DataScientistPipeline(BasePipeline):
 
         self.context = Context(["profiles", "states"])
         profiles = self.context.profiles
-        llm = config.llm.main_model
+        llm = self.config.llm.main_model
 
         # Create manager agents from profiles dict (name auto-derived from key)
         self.observe_agent = ContextAgent.from_profile(profiles["observe"], llm)
@@ -132,7 +137,7 @@ class DataScientistPipeline(BasePipeline):
                 logger.debug(f"Failed to record payload for {context_label}: {exc}")
 
     @auto_trace
-    async def run(self, query: Optional[str] = None):
+    async def run(self, query: DataScienceQuery):
         self.iteration = 0
 
         formatted_query = (
@@ -170,18 +175,18 @@ class DataScientistPipeline(BasePipeline):
             self._record_structured_payload(evaluations, context_label="evaluate_agent")
 
             route_plan = None
-            if not state.complete:
+            if not self.context.state.complete:
                 route_plan = await self.routing_agent(evaluations)
                 self._record_structured_payload(route_plan, context_label="routing_agent")
 
-            if not state.complete:
+            if not self.context.state.complete:
                 # Retrieve route_plan from payloads
                 plan = None
                 if isinstance(route_plan, AgentSelectionPlan):
                     plan = route_plan
                 elif route_plan:
                     # Try to find AgentSelectionPlan in payloads
-                    for payload in state.current_iteration.payloads:
+                    for payload in self.context.state.current_iteration.payloads:
                         if isinstance(payload, AgentSelectionPlan):
                             plan = payload
                             break
@@ -197,7 +202,7 @@ class DataScientistPipeline(BasePipeline):
             self.end_group(iteration_group, is_done=True)
             self.current_printer_group = None
 
-            if state.complete:
+            if self.context.state.complete:
                 break
 
         final_group = "iter-final"
@@ -207,15 +212,15 @@ class DataScientistPipeline(BasePipeline):
             border_style="white",
         )
         self.current_printer_group = final_group
-        await self.writer_agent(state.findings_text())
+        await self.writer_agent(self.context.state.findings_text())
         self.end_group(final_group, is_done=True)
         self.current_printer_group = None
 
         self.update_printer("research", "Research workflow complete", is_done=True)
         logger.info("Research workflow completed")
 
-        if state.final_report:
-            timestamped_report = f"Experiment {self.experiment_id}\n\n{(state.final_report or '').strip()}"
+        if self.context.state.final_report:
+            timestamped_report = f"Experiment {self.experiment_id}\n\n{(self.context.state.final_report or '').strip()}"
             global_memory.store(
                 key=f"report_{self.experiment_id}",
                 value=timestamped_report,
@@ -223,4 +228,4 @@ class DataScientistPipeline(BasePipeline):
             )
             self.update_printer("writer_agent", "Final report generated", is_done=True)
 
-        return state.final_report
+        return self.context.state.final_report

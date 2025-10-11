@@ -4,7 +4,7 @@ from loguru import logger
 
 from agentz.agent.registry import create_agents
 from agentz.flow import auto_trace
-from agentz.context.behavior_profiles import runtime_prompts
+from agentz.profiles.base import load_all_profiles
 from pipelines.base import BasePipeline
 from agentz.agent.base import ContextAgent as Agent
 from agentz.mcp.manager import MCPManager, MCPServerSpec
@@ -57,6 +57,9 @@ class SimpleBrowserPipeline(BasePipeline):
         # Disable report generation for this pipeline
         self.reporter = NullReporter()
 
+        # Load profiles for template rendering
+        self.profiles = load_all_profiles()
+
         # Setup routing agent
         self.routing_agent = create_agents("routing_agent", config)
 
@@ -102,14 +105,14 @@ class SimpleBrowserPipeline(BasePipeline):
 
             # Route the task
             # self.update_printer("route", "Routing task to agent...")
+            routing_instructions = self.profiles["routing"].render(
+                QUERY=query,
+                GAP="Route the query to the browser_agent",
+                HISTORY=""
+            )
             selection_plan = await self.agent_step(
                 agent=self.routing_agent,
-                instructions=runtime_prompts.render(
-                    "routing_agent",
-                    "single_agent_routing",
-                    QUERY=query,
-                    AVAILABLE_AGENT="browser_agent",
-                ),
+                instructions=routing_instructions,
                 span_name="route_task",
                 span_type="agent",
                 output_model=self.routing_agent.output_type,

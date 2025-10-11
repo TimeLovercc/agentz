@@ -45,6 +45,26 @@ class Profile(BaseModel):
 
         return self
 
+    def render(self, **kwargs) -> str:
+        """Render the runtime template with provided keyword arguments.
+
+        Args:
+            **kwargs: Values to substitute for placeholders in the template.
+                     Keys are matched case-insensitively with [[PLACEHOLDER]] patterns.
+
+        Returns:
+            Rendered template string with all placeholders replaced.
+
+        Examples:
+            profile.render(QUERY="What is AI?", HISTORY="Previous context...")
+        """
+        result = self.runtime_template
+        # Replace [[KEY]] placeholders with provided values
+        for key, value in kwargs.items():
+            placeholder = f"[[{key.upper()}]]"
+            result = result.replace(placeholder, str(value))
+        return result
+
 
 def load_all_profiles():
     """Load all Profile instances from the profiles package.
