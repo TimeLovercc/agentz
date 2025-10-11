@@ -59,8 +59,14 @@ class ContextAgent(Agent[TContext]):
         profile_key = getattr(profile, "_key", "agent")
         agent_name = profile_key + "_agent" if profile_key != "agent" else "agent"
 
-        # Get tools, default to empty list if None
-        tools = getattr(profile, "tools", None) or []
+        # Get tools from profile
+        profile_tools = getattr(profile, "tools", None) or []
+
+        # Resolve tool names to tool objects if needed
+        tools = []
+        if profile_tools:
+            from agentz.tools import resolve_tools
+            tools = resolve_tools(profile_tools)
 
         return cls(
             name=agent_name,
