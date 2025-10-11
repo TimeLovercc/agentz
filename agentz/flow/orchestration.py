@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, Optional
 
 from pydantic import BaseModel
 
-from agentz.context.engine import ContextEngine
+from agentz.context.context import Context
 
 
 class WorkflowOrchestrator:
@@ -21,21 +21,21 @@ class WorkflowOrchestrator:
     the underlying components decoupled.
 
     This orchestrator decouples behaviors from agents by:
-    1. Rendering the behavior using ContextEngine
+    1. Rendering the behavior using Context
     2. Selecting a capable agent (currently via explicit mapping)
     3. Executing the agent with the rendered instructions
     """
 
     def __init__(
         self,
-        engine: ContextEngine,
+        engine: Context,
         agent_registry: Dict[str, Any],
         pipeline: Any,
     ):
         """Initialize workflow orchestrator.
 
         Args:
-            engine: ContextEngine for state management
+            engine: Context for state management
             agent_registry: Mapping of agent names to agent instances
             pipeline: Pipeline instance for execution
         """
@@ -47,10 +47,10 @@ class WorkflowOrchestrator:
         self,
         behavior_name: str,
         agent_name: str,
-        snapshot_builder: Callable[[ContextEngine], Dict[str, Any]],
-        output_handler: Callable[[ContextEngine, Any], None],
+        snapshot_builder: Callable[[Context], Dict[str, Any]],
+        output_handler: Callable[[Context, Any], None],
         *,
-        condition: Optional[Callable[[ContextEngine], bool]] = None,
+        condition: Optional[Callable[[Context], bool]] = None,
         output_model: Optional[type[BaseModel]] = None,
         span_name: Optional[str] = None,
         span_type: str = "agent",

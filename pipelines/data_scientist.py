@@ -9,11 +9,11 @@ from typing import Dict, Optional
 from loguru import logger
 from pydantic import BaseModel
 
-from agentz.agent.agent_base import ContextAgent
+from agentz.agent.registry import create_agents
 from agentz.profiles.manager.routing import AgentSelectionPlan, AgentTask
 from agentz.profiles.base import ToolAgentOutput
-from agentz.context.conversation import ConversationState
-from agentz.context.engine import ContextEngine
+from agentz.context.conversation import create_conversation_state
+from agentz.context.context import Context
 from agentz.context.global_memory import global_memory
 from agentz.flow import auto_trace
 from pipelines.base import BasePipeline
@@ -24,7 +24,7 @@ from agentz.profiles.base import load_all_profiles
 async def execute_tool_plan(
     *,
     pipeline: BasePipeline,
-    context: ContextEngine,
+    context: Context,
     tool_agents: Dict[str, object],
     iteration_group: str,
 ) -> None:
@@ -39,7 +39,6 @@ async def execute_tool_plan(
         return
 
     state.current_iteration.tools.clear()
-    state.current_iteration.findings.clear()
 
     async def run_single(task: AgentTask) -> ToolAgentOutput:
         agent = tool_agents.get(task.agent)
@@ -93,9 +92,6 @@ async def execute_tool_plan(
     for coro in asyncio.as_completed(coroutines):
         tool_output = await coro
         state.current_iteration.tools.append(tool_output)
-        output_value = getattr(tool_output, "output", None)
-        if output_value:
-            context.add_finding(output_value)
 
 
 class DataScientistPipeline(BasePipeline):
@@ -105,29 +101,24 @@ class DataScientistPipeline(BasePipeline):
         super().__init__(config)
 
         profiles = load_all_profiles()
-        state = ConversationState(profiles=profiles)
+        state = create_conversation_state(profiles=profiles)
+        self.context = Context(state=state)
 
-        self.context = ContextEngine(
-            state=state,
-            config=config,
-        )
+        # Create agents using registry
+        self.observe_agent = create_agents("observe_agent", config)
+        self.evaluate_agent = create_agents("evaluate_agent", config)
+        self.routing_agent = create_agents("routing_agent", config)
+        self.writer_agent = create_agents("writer_agent", config)
 
-        self.observe_agent = ContextAgent(profiles["observe_profile"], llm = config.llm)
-        self.evaluate_agent = ContextAgent(profiles["evaluate_profile"], llm = config.llm)
-        self.routing_agent = ContextAgent(profiles["route_profile"], llm = config.llm)
-        self.writer_agent = ContextAgent(profiles["writer_profile"], llm = config.llm)
-
-        self.tool_agents = ContextAgent(
-            {
-                "data_loader_agent": {"profile": "data_loader", "llm": config.llm},
-                "data_analysis_agent": {"profile": "data_analysis", "llm": config.llm},
-                "preprocessing_agent": {"profile": "preprocessing", "llm": config.llm},
-                "model_training_agent": {"profile": "model_training", "llm": config.llm},
-                "evaluation_agent": {"profile": "evaluation", "llm": config.llm},
-                "visualization_agent": {"profile": "visualization", "llm": config.llm},
-                "code_generation_agent": {"profile": "code_generation", "llm": config.llm},
-            },
-        )
+        self.tool_agents = create_agents([
+            "data_loader_agent",
+            "data_analysis_agent",
+            "preprocessing_agent",
+            "model_training_agent",
+            "evaluation_agent",
+            "visualization_agent",
+            "code_generation_agent",
+        ], config)
 
     def _record_structured_payload(self, value: object, *, context_label: str) -> None:
         if isinstance(value, BaseModel):
@@ -152,9 +143,6 @@ class DataScientistPipeline(BasePipeline):
         self.update_printer("research", "Executing research workflow...")
         self.start_time = time.time()
         self.context.state.start_timer()
-
-        for agent in (self.observe_agent, self.evaluate_agent, self.routing_agent, self.writer_agent):
-            agent.bind(self)
 
         loop_index = 0
         while not state.complete and self._check_constraints():

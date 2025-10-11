@@ -2,7 +2,7 @@
 
 from typing import Any, Callable, Optional
 
-from agentz.context.engine import ContextEngine
+from agentz.context.context import Context
 
 
 class IterationManager:
@@ -20,15 +20,15 @@ class IterationManager:
 
     def __init__(
         self,
-        engine: ContextEngine,
-        loop_condition: Callable[[ContextEngine], bool],
+        engine: Context,
+        loop_condition: Callable[[Context], bool],
         pipeline: Any,  # Pipeline for printer access
-        after_iteration: Optional[Callable[[ContextEngine], None]] = None,
+        after_iteration: Optional[Callable[[Context], None]] = None,
     ):
         """Initialize iteration manager.
 
         Args:
-            engine: ContextEngine for state management
+            engine: Context for state management
             loop_condition: Callable that determines if iteration should continue
             pipeline: Pipeline instance for printer updates
             after_iteration: Optional callback after each iteration

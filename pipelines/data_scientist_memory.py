@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
-from agentz.context.conversation import ConversationState
-from agentz.context.engine import ContextEngine
+from agentz.context.conversation import create_conversation_state
+from agentz.context.context import Context
 from agentz.profiles.manager.memory import MemoryAgentOutput
 from agentz.profiles.manager.evaluate import EvaluateOutput
 from agentz.profiles.manager.routing import AgentSelectionPlan
+from agentz.profiles.base import load_all_profiles
 from agentz.agent.registry import create_agents
 from agentz.flow import auto_trace
 from pipelines.data_scientist import DataScientistPipeline
@@ -21,15 +22,14 @@ class DataScientistMemoryPipeline(DataScientistPipeline):
         from pipelines.base import BasePipeline
         BasePipeline.__init__(self, config)
 
+        profiles = load_all_profiles()
+        state = create_conversation_state(profiles=profiles)
+
         # Centralized context engine with state and behaviors (including memory)
-        self.context = ContextEngine(
-            state=ConversationState(
-                query="",
-                data_path=self.config.data_path,
-                max_iterations=self.max_iterations,
-                max_minutes=self.max_time_minutes,
-            ),
-            behaviors=["observe", "evaluate", "route", "writer", "memory"]
+        self.context = Context(
+            state=state,
+            behaviors=["observe", "evaluate", "route", "writer", "memory"],
+            config=config,
         )
 
         # Manager agents with memory support
