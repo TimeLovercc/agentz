@@ -11,7 +11,7 @@ from agents.tracing.create import function_span
 from agentz.configuration.base import BaseConfig, resolve_config
 from agentz.runner import (
     AgentExecutor,
-    ExecutionContext,
+    RuntimeTracker,
 )
 from agentz.reporting import RunReporter
 from agentz.utils import Printer, get_experiment_timestamp
@@ -98,8 +98,8 @@ class BasePipeline:
         # Setup tracing configuration and logging
         self._setup_tracing()
 
-        # Initialize execution context and executor (from flow module)
-        self._execution_context: Optional[ExecutionContext] = None
+        # Initialize runtime tracker and executor
+        self._runtime_tracker: Optional[RuntimeTracker] = None
         self._executor: Optional[AgentExecutor] = None
 
         # Hook registry for event-driven extensibility
@@ -134,10 +134,10 @@ class BasePipeline:
         return self._printer
 
     @property
-    def execution_context(self) -> ExecutionContext:
-        """Get or create the execution context."""
-        if self._execution_context is None:
-            self._execution_context = ExecutionContext(
+    def runtime_tracker(self) -> RuntimeTracker:
+        """Get or create the runtime tracker."""
+        if self._runtime_tracker is None:
+            self._runtime_tracker = RuntimeTracker(
                 printer=self.printer,
                 enable_tracing=self.enable_tracing,
                 trace_sensitive=self.trace_sensitive,
@@ -146,23 +146,23 @@ class BasePipeline:
                 reporter=self.reporter,
             )
         else:
-            # Update iteration in existing context
-            self._execution_context.iteration = self.iteration
-            self._execution_context.printer = self.printer
-            self._execution_context.reporter = self.reporter
-        return self._execution_context
+            # Update iteration in existing tracker
+            self._runtime_tracker.iteration = self.iteration
+            self._runtime_tracker.printer = self.printer
+            self._runtime_tracker.reporter = self.reporter
+        return self._runtime_tracker
 
     @property
     def executor(self) -> AgentExecutor:
         """Get or create the agent executor."""
-        # Refresh execution context so iteration/printer stay in sync across loops
-        context = self.execution_context
+        # Refresh runtime tracker so iteration/printer stay in sync across loops
+        tracker = self.runtime_tracker
 
         if self._executor is None:
-            self._executor = AgentExecutor(context)
+            self._executor = AgentExecutor(tracker)
         else:
-            # Executor holds a reference to the context; update it in case it changed
-            self._executor.context = context
+            # Executor holds a reference to the tracker; update it in case it changed
+            self._executor.context = tracker
         return self._executor
 
     def start_printer(self) -> Printer:
@@ -256,12 +256,12 @@ class BasePipeline:
             self.console.print(f"🤖 Model: {self.config.llm.model_name}")
 
     def trace_context(self, name: str, metadata: Optional[Dict[str, Any]] = None):
-        """Create a trace context - delegates to ExecutionContext."""
-        return self.execution_context.trace_context(name, metadata=metadata)
+        """Create a trace context - delegates to RuntimeTracker."""
+        return self.runtime_tracker.trace_context(name, metadata=metadata)
 
     def span_context(self, span_factory, **kwargs):
-        """Create a span context - delegates to ExecutionContext."""
-        return self.execution_context.span_context(span_factory, **kwargs)
+        """Create a span context - delegates to RuntimeTracker."""
+        return self.runtime_tracker.span_context(span_factory, **kwargs)
 
     async def agent_step(
         self,
@@ -323,7 +323,7 @@ class BasePipeline:
     ) -> None:
         """Update printer status if printer is active.
 
-        This method delegates to ExecutionContext.
+        This method delegates to RuntimeTracker.
 
         Args:
             key: Status key to update
@@ -334,7 +334,7 @@ class BasePipeline:
             border_style: Optional border color
             group_id: Optional group to nest this item in
         """
-        self.execution_context.update_printer(
+        self.runtime_tracker.update_printer(
             key,
             message,
             is_done=is_done,

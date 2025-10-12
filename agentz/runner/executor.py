@@ -10,7 +10,7 @@ from agentz.runner.base import ContextRunner as Runner
 from agents.tracing.create import agent_span, function_span
 from pydantic import BaseModel
 
-from agentz.runner.context import ExecutionContext
+from agentz.runner.tracker import RuntimeTracker
 
 
 @dataclass
@@ -77,11 +77,11 @@ class AgentExecutor:
     - Sync/async execution
     """
 
-    def __init__(self, context: ExecutionContext):
-        """Initialize executor with execution context.
+    def __init__(self, context: RuntimeTracker):
+        """Initialize executor with runtime tracker.
 
         Args:
-            context: ExecutionContext for tracing, printing, etc.
+            context: RuntimeTracker for tracing, printing, etc.
         """
         self.context = context
 
