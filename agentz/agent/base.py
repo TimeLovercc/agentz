@@ -36,6 +36,8 @@ class ContextAgent(Agent[TContext]):
         self.prompt_builder = prompt_builder
         self.default_span_type = default_span_type
         self.output_parser = output_parser
+        self._pipeline = None  # Optional pipeline reference for context-aware execution
+        self._role = None  # Optional role identifier for automatic iteration tracking
 
     @classmethod
     def from_profile(cls, profile: Any, llm: str) -> "ContextAgent":
@@ -172,20 +174,23 @@ class ContextAgent(Agent[TContext]):
             **span_kwargs,
         )
 
-    async def __call__(self, payload: Any = None) -> Any:
+    async def __call__(self, payload: Any = None, group_id: Optional[str] = None) -> Any:
         """Make ContextAgent callable directly.
 
         This allows usage like: result = await agent(input_data)
-        Directly runs the agent using the underlying Runner.
+
+        When called within a pipeline context (self._pipeline is set), uses the
+        pipeline's agent_step for full tracking/tracing. Otherwise, uses ContextRunner.
 
         Note: When calling directly without pipeline context, input validation
         is relaxed to allow string inputs even if agent has a defined input_model.
 
         Args:
             payload: Input data for the agent
+            group_id: Optional group ID for tracking (used with pipeline context)
 
         Returns:
-            RunResult from agent execution
+            Parsed output if in pipeline context, otherwise RunResult
         """
         # Build prompt with non-strict input coercion
         # This allows string inputs to pass through without validation errors
@@ -203,7 +208,35 @@ class ContextAgent(Agent[TContext]):
         else:
             instructions = str(validated)
 
-        # Use ContextRunner to execute the agent
+        # If pipeline context is available, use it for full tracking
+        if self._pipeline is not None:
+            result = await self._pipeline.agent_step(
+                agent=self,
+                instructions=instructions,
+                group_id=group_id,
+            )
+            # Extract final output for cleaner API
+            output = result.final_output if hasattr(result, 'final_output') else result
+
+            # Automatic iteration tracking based on role
+            if self._role and hasattr(self._pipeline, 'context'):
+                try:
+                    iteration = self._pipeline.context.current_iteration
+
+                    # Special handling for "observe" role - set iteration.observation
+                    if self._role == "observe":
+                        serialized = self._pipeline._serialize_output(output)
+                        iteration.observation = serialized
+
+                    # Record structured payload for all roles
+                    self._pipeline._record_structured_payload(output, context_label=self._role)
+                except Exception:
+                    # Silently skip if context/iteration not available
+                    pass
+
+            return output
+
+        # Otherwise, use ContextRunner to execute the agent
         from agentz.runner import ContextRunner
 
         result = await ContextRunner.run(

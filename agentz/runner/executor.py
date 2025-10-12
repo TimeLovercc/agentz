@@ -112,12 +112,13 @@ class AgentExecutor:
         self,
         agent,
         instructions: str,
-        span_name: str,
+        span_name: Optional[str] = None,
         span_type: str = "agent",
         output_model: Optional[type[BaseModel]] = None,
         sync: bool = False,
         printer_key: Optional[str] = None,
         printer_title: Optional[str] = None,
+        group_id: Optional[str] = None,
         printer_group_id: Optional[str] = None,
         printer_border_style: Optional[str] = None,
         **span_kwargs
@@ -127,23 +128,44 @@ class AgentExecutor:
         Args:
             agent: The agent to run
             instructions: Instructions/prompt for the agent
-            span_name: Name for the span
+            span_name: Name for the span (auto-detected from agent.name if not provided)
             span_type: Type of span - "agent" or "function"
             output_model: Optional pydantic model to parse output
             sync: Whether to run synchronously
-            printer_key: Optional key for printer updates (will be prefixed with iter:N:)
-            printer_title: Optional title for printer display
-            printer_group_id: Optional group to nest this item in
+            printer_key: Optional key for printer updates (auto-detected from agent.name if not provided)
+            printer_title: Optional title for printer display (auto-detected from agent.name if not provided)
+            group_id: Optional group to nest this item in (alias for printer_group_id)
+            printer_group_id: Optional group to nest this item in (deprecated, use group_id)
             printer_border_style: Optional border color
             **span_kwargs: Additional kwargs for span (e.g., tools, input)
 
         Returns:
             Parsed output if output_model provided, otherwise Runner result
         """
+        # Extract agent name for auto-detection
+        agent_name = getattr(agent, "name", getattr(agent, "__class__", type("obj", (), {})).__name__)
+
+        # Auto-detect span_name from agent if not provided
+        if span_name is None:
+            span_name = str(agent_name)
+
+        # Auto-detect printer_key from agent if not provided
+        if printer_key is None:
+            printer_key = str(agent_name)
+
+        # Auto-detect printer_title from agent if not provided
+        if printer_title is None:
+            # Capitalize first letter and add "ing" suffix
+            title_base = str(agent_name).capitalize()
+            printer_title = f"{title_base}"
+
+        # Support both group_id and printer_group_id (group_id takes precedence)
+        if group_id is not None:
+            printer_group_id = group_id
+
         span_factory = agent_span if span_type == "agent" else function_span
 
         reporter = self.context.reporter
-        agent_name = getattr(agent, "name", getattr(agent, "__class__", type("obj", (), {})).__name__)
         step_id: Optional[str] = None
         if reporter:
             step_id = f"{self.context.iteration}-{span_name}-{time.time_ns()}"

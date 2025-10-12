@@ -55,6 +55,22 @@ class DataScientistPipeline(BasePipeline):
             for name in tool_names
         }
 
+        # Bind all agents to this pipeline for context-aware execution
+        self.observe_agent._pipeline = self
+        self.observe_agent._role = "observe"
+
+        self.evaluate_agent._pipeline = self
+        self.evaluate_agent._role = "evaluate"
+
+        self.routing_agent._pipeline = self
+        self.routing_agent._role = "routing"
+
+        self.writer_agent._pipeline = self
+        self.writer_agent._role = "writer"
+
+        for agent in self.tool_agents.values():
+            agent._pipeline = self
+
     def prepare_query_hook(self, query: DataScienceQuery) -> str:
         """Format data science query."""
         return (
@@ -64,80 +80,40 @@ class DataScientistPipeline(BasePipeline):
         )
 
     async def execute(self) -> Any:
-        """Execute data science workflow with explicit iteration and tool execution.
-
-        This shows the full workflow:
-        1. Iterative loop with observe → evaluate → route → execute tools
-        2. Final report generation with writer agent
-        """
+        """Execute data science workflow - full implementation in one function."""
         self.update_printer("research", "Executing research workflow...")
 
-        return await self.run_iterative_loop(
-            iteration_body=self._iteration_step,
-            final_body=self._final_step
-        )
+        # Iterative loop: observe → evaluate → route → tools
+        while self.iteration < self.max_iterations and not self.context.state.complete:
+            # Begin iteration
+            iteration = self.context.begin_iteration()
+            group_id = f"iter-{iteration.index}"
+            self.iteration = iteration.index
+            self.start_group(group_id, title=f"Iteration {iteration.index}", border_style="white", iteration=iteration.index)
 
-    async def _iteration_step(self, iteration, group_id: str):
-        """Execute one iteration: observe → evaluate → route → tools."""
-        query = self.context.state.query
+            query = self.context.state.query
 
-        # Step 1: Observe current state and gather information
-        observe_result = await self.agent_step(
-            agent=self.observe_agent,
-            instructions=query,
-            span_name="observe",
-            span_type="agent",
-            printer_key="observe",
-            printer_title="Observing",
-            printer_group_id=group_id,
-        )
-        observe_output = observe_result.final_output if hasattr(observe_result, 'final_output') else observe_result
-        iteration.observation = self._serialize_output(observe_output)
-        self._record_structured_payload(observe_output, context_label="observe")
+            # Observe → Evaluate → Route → Tools
+            observe_output = await self.observe_agent(query, group_id=group_id)
+            evaluate_output = await self.evaluate_agent(observe_output, group_id=group_id)
 
-        # Step 2: Evaluate progress and determine next actions
-        # Pass serialized observe output to evaluate agent
-        evaluate_result = await self.agent_step(
-            agent=self.evaluate_agent,
-            instructions=self._serialize_output(observe_output),
-            span_name="evaluate",
-            span_type="agent",
-            printer_key="evaluate",
-            printer_title="Evaluating",
-            printer_group_id=group_id,
-        )
-        evaluate_output = evaluate_result.final_output if hasattr(evaluate_result, 'final_output') else evaluate_result
-        self._record_structured_payload(evaluate_output, context_label="evaluate")
+            if not self.context.state.complete:
+                routing_output = await self.routing_agent(self._serialize_output(evaluate_output), group_id=group_id)
+                await self._execute_tools(routing_output, self.tool_agents, group_id)
 
-        # Step 3: Route to appropriate tools if not complete
-        if not self.context.state.complete:
-            # Pass serialized evaluate output to routing agent
-            routing_result = await self.agent_step(
-                agent=self.routing_agent,
-                instructions=self._serialize_output(evaluate_output),
-                span_name="routing",
-                span_type="agent",
-                printer_key="routing",
-                printer_title="Routing",
-                printer_group_id=group_id,
-            )
-            routing_output = routing_result.final_output if hasattr(routing_result, 'final_output') else routing_result
-            self._record_structured_payload(routing_output, context_label="routing")
+            # End iteration
+            self.context.mark_iteration_complete()
+            self.end_group(group_id, is_done=True)
 
-            # Step 4: Execute selected tools in parallel
-            await self._execute_tools(routing_output, self.tool_agents, group_id)
+            if self.context.state.complete:
+                break
 
-    async def _final_step(self, final_group: str):
-        """Generate final report using writer agent."""
+        # Final report
+        final_group = "iter-final"
+        self.start_group(final_group, title="Final Report", border_style="white")
         self.update_printer("research", "Research workflow complete", is_done=True)
 
         findings = self.context.state.findings_text()
-        await self.agent_step(
-            agent=self.writer_agent,
-            instructions=findings,
-            span_name="writer",
-            span_type="agent",
-            printer_key="writer",
-            printer_title="Writing Report",
-            printer_group_id=final_group,
-        )
+        await self.writer_agent(findings, group_id=final_group)
+
+        self.end_group(final_group, is_done=True)
