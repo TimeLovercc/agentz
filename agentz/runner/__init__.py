@@ -1,11 +1,14 @@
-"""Agent runtime execution flow module.
+"""Agent runtime execution module.
 
-This module provides core runtime execution primitives and patterns for orchestrating
-agent workflows.
+This module provides the complete agent runtime infrastructure:
 
-Core Components:
+Base Runners:
+- Runner: Base runner from agents library (re-exported)
+- ContextRunner: Context-aware runner with output parsing
+
+Execution Infrastructure:
 - ExecutionContext: Manages runtime state (tracing, printing, iteration tracking)
-- AgentExecutor: Core execution primitive for running agents
+- AgentExecutor: High-level agent execution with full pipeline infrastructure
 - AgentStep: Abstraction for a single agent execution step
 
 Iteration Management:
@@ -27,17 +30,18 @@ Patterns:
 - PipelinePattern: Compose multiple patterns
 """
 
-from agentz.flow.context import (
+from agentz.runner.base import Runner, ContextRunner
+from agentz.runner.context import (
     ExecutionContext,
     auto_trace,
     with_span_step,
     get_current_context,
     get_current_data_store,
 )
-from agentz.flow.executor import AgentExecutor, AgentStep, PrinterConfig
-from agentz.flow.iteration import IterationManager
-from agentz.flow.orchestration import WorkflowOrchestrator
-from agentz.flow.patterns import (
+from agentz.runner.executor import AgentExecutor, AgentStep, PrinterConfig
+from agentz.runner.iteration import IterationManager
+from agentz.runner.orchestration import WorkflowOrchestrator
+from agentz.runner.patterns import (
     ConditionalPattern,
     ExecutionPattern,
     LoopPattern,
@@ -48,7 +52,10 @@ from agentz.flow.patterns import (
 )
 
 __all__ = [
-    # Core
+    # Base runners
+    "Runner",
+    "ContextRunner",
+    # Execution infrastructure
     "ExecutionContext",
     "AgentExecutor",
     "AgentStep",

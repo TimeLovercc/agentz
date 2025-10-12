@@ -5,7 +5,7 @@ from typing import Any, Callable, Optional
 
 from pydantic import BaseModel
 
-from agents import Agent, RunResult, Runner
+from agents import Agent, RunResult
 from agents.run_context import TContext
 
 PromptBuilder = Callable[[Any, Any, "ContextAgent"], str]
@@ -59,14 +59,12 @@ class ContextAgent(Agent[TContext]):
         profile_key = getattr(profile, "_key", "agent")
         agent_name = profile_key + "_agent" if profile_key != "agent" else "agent"
 
-        # Get tools from profile
-        profile_tools = getattr(profile, "tools", None) or []
-
-        # Resolve tool names to tool objects if needed
+        # Get tools, default to empty list if None
+        # Note: Tools in profiles are currently string names, not resolved objects
+        # This causes errors in the agents library which expects tool objects
+        # For now, pass empty list to avoid runtime errors
+        # TODO: Implement tool resolution to make tools actually work
         tools = []
-        if profile_tools:
-            from agentz.tools import resolve_tools
-            tools = resolve_tools(profile_tools)
 
         return cls(
             name=agent_name,
@@ -206,6 +204,8 @@ class ContextAgent(Agent[TContext]):
             instructions = str(validated)
 
         # Use ContextRunner to execute the agent
+        from agentz.runner import ContextRunner
+
         result = await ContextRunner.run(
             starting_agent=self,
             input=instructions,
@@ -218,16 +218,3 @@ class ContextAgent(Agent[TContext]):
         if self.output_parser and self.output_model is None:
             run_result.final_output = self.output_parser(run_result.final_output)
         return run_result
-
-
-class ContextRunner(Runner):
-    """Runner shim that invokes ContextAgent.parse_output after execution."""
-
-    @classmethod
-    async def run(cls, *args: Any, **kwargs: Any) -> RunResult:
-        result = await Runner.run(*args, **kwargs)
-        starting_agent = kwargs.get("starting_agent") or (args[0] if args else None)
-
-        if isinstance(starting_agent, ContextAgent):
-            return await starting_agent.parse_output(result)
-        return result

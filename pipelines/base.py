@@ -10,7 +10,7 @@ from rich.console import Console
 from agents.tracing.create import function_span
 from agentz.agent.registry import AgentStore, set_current_pipeline_store
 from agentz.configuration.base import BaseConfig, resolve_config
-from agentz.flow import (
+from agentz.runner import (
     AgentExecutor,
     ExecutionContext,
 )

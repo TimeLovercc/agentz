@@ -9,7 +9,7 @@ from agentz.profiles.manager.evaluate import EvaluateOutput
 from agentz.profiles.manager.routing import AgentSelectionPlan
 from agentz.profiles.base import load_all_profiles
 from agentz.agent.registry import create_agents
-from agentz.flow import auto_trace
+from agentz.runner import auto_trace
 from pipelines.data_scientist import DataScientistPipeline
 
 
@@ -52,7 +52,7 @@ class DataScientistMemoryPipeline(DataScientistPipeline):
         ], config)
 
         # Workflow orchestration
-        from agentz.flow import WorkflowOrchestrator, IterationManager
+        from agentz.runner import WorkflowOrchestrator, IterationManager
         self.flow = WorkflowOrchestrator(
             engine=self.context,
             agent_registry=manager_agents,

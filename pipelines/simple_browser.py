@@ -3,7 +3,7 @@ from __future__ import annotations
 from loguru import logger
 
 from agentz.agent.registry import create_agents
-from agentz.flow import auto_trace
+from agentz.runner import auto_trace
 from agentz.profiles.base import load_all_profiles
 from pipelines.base import BasePipeline
 from agentz.agent.base import ContextAgent as Agent
