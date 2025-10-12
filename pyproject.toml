@@ -1,10 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "ds1"
+name = "zero-agent"
 version = "0.1.0"
-description = "Add your description here"
+description = "A Research-Oriented Multi-Agent System Platform"
 readme = "README.md"
 requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Zhimeng Guo", email = "gzjz07@outlook.com"}
+]
+keywords = ["agent", "multi-agent", "ai", "llm", "research", "machine-learning", "autonomous-agents"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
+    "build>=1.3.0",
     "google-generativeai>=0.8.5",
     "ipdb>=0.13.13",
     "litellm==1.76",
@@ -16,5 +35,16 @@ dependencies = [
     "rich>=14.1.0",
     "scikit-learn>=1.7.2",
     "seaborn>=0.13.2",
+    "twine>=6.2.0",
     "weave>=0.52.8",
 ]
+
+[project.urls]
+Homepage = "https://github.com/TimeLovercc/agentz"
+Repository = "https://github.com/TimeLovercc/agentz"
+Documentation = "https://github.com/TimeLovercc/agentz#readme"
+"Bug Tracker" = "https://github.com/TimeLovercc/agentz/issues"
+
+[tool.setuptools.packages.find]
+include = ["agentz*", "pipelines*"]
+exclude = ["examples*", "data*", "outputs*", "experience*"]
