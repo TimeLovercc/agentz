@@ -446,7 +446,7 @@ class BasePipeline:
         """Initialize pipeline state and format query.
 
         Default implementation:
-        - Formats query via prepare_query_hook()
+        - Formats query via format_query()
         - Sets state query
         - Updates printer status
 
@@ -456,12 +456,12 @@ class BasePipeline:
             query: Input query (can be None)
         """
         if query is not None:
-            formatted_query = self.prepare_query_hook(query)
+            formatted_query = self.format_query(query)
             if self.state:
                 self.state.set_query(formatted_query)
         self.update_printer("initialization", "Pipeline initialized", is_done=True)
 
-    def prepare_query_hook(self, query: Any) -> str:
+    def format_query(self, query: Any) -> str:
         """Transform input query to formatted string.
 
         Override this to customize query formatting.

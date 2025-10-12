@@ -51,7 +51,7 @@ class DataScientistMemoryPipeline(DataScientistPipeline):
         self.report_instructions: Optional[str] = None
 
 
-    def prepare_query_hook(self, query):
+    def format_query(self, query):
         """Format data science query."""
         return (
             f"Task: {query.prompt}\n"

@@ -21,7 +21,7 @@ class DataScientistPipeline(BasePipeline):
     This pipeline demonstrates the minimal implementation needed:
     - __init__: Setup agents
     - execute: Use run_manager_tool_loop pattern
-    - prepare_query_hook: Format query (optional)
+    - format_query: Format query (optional)
 
     All other logic (iteration, tool execution, memory save) is handled by BasePipeline.
     """
@@ -71,7 +71,7 @@ class DataScientistPipeline(BasePipeline):
         for agent in self.tool_agents.values():
             agent._pipeline = self
 
-    def prepare_query_hook(self, query: DataScienceQuery) -> str:
+    def format_query(self, query: DataScienceQuery) -> str:
         """Format data science query."""
         return (
             f"Task: {query.prompt}\n"
