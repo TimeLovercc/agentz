@@ -13,8 +13,6 @@ from agentz.runner import (
     AgentExecutor,
     RuntimeTracker,
     HookRegistry,
-    IterationManager,
-    WorkflowHelpers,
     execute_tool_plan,
     execute_tools,
     run_manager_tool_loop,
@@ -113,11 +111,9 @@ class BasePipeline:
         # Initialize hook registry
         self._hook_registry = HookRegistry()
 
-        # Initialize iteration manager (will be configured with callbacks later)
-        self._iteration_manager: Optional[IterationManager] = None
-
-        # Initialize workflow helpers (will be configured with callbacks later)
-        self._workflow_helpers: Optional[WorkflowHelpers] = None
+    # ============================================
+    # Core Properties
+    # ============================================
 
     @property
     def enable_tracing(self) -> bool:
@@ -172,31 +168,9 @@ class BasePipeline:
             self._executor.context = tracker
         return self._executor
 
-    @property
-    def iteration_manager(self) -> IterationManager:
-        """Get or create the iteration manager."""
-        if self._iteration_manager is None:
-            self._iteration_manager = IterationManager(
-                context=self.context,
-                max_iterations=self.max_iterations,
-                max_time_minutes=self.max_time_minutes,
-                start_group_callback=self.start_group,
-                end_group_callback=self.end_group,
-            )
-        return self._iteration_manager
-
-    @property
-    def workflow_helpers(self) -> WorkflowHelpers:
-        """Get or create the workflow helpers."""
-        if self._workflow_helpers is None:
-            self._workflow_helpers = WorkflowHelpers(
-                iteration_manager=self.iteration_manager,
-                hook_registry=self._hook_registry,
-                start_group_callback=self.start_group,
-                end_group_callback=self.end_group,
-                update_printer_callback=self.update_printer,
-            )
-        return self._workflow_helpers
+    # ============================================
+    # Printer & Reporter Management
+    # ============================================
 
     def start_printer(self) -> Printer:
         if self._printer is None:
@@ -204,178 +178,13 @@ class BasePipeline:
         return self._printer
 
     def stop_printer(self) -> None:
+        """Stop the live printer and finalize reporter if active."""
         if self._printer is not None:
             self._printer.end()
             self._printer = None
-
-    def _start_printer(self) -> None:
-        """Create and attach a live status printer for this run."""
-        if self.printer is None:
-            self.start_printer()
-
-    def _stop_printer(self) -> None:
-        """Stop the live printer if it's currently active."""
-        if self.printer is not None:
-            self.stop_printer()
         if self.reporter is not None:
             self.reporter.finalize()
             self.reporter.print_terminal_report()
-
-    def _initialize_run(self, additional_logging=None):
-        """Initialize a pipeline run with logging, printer, and tracing.
-
-        Args:
-            additional_logging: Optional callable for pipeline-specific logging
-
-        Returns:
-            Trace context manager for the workflow
-        """
-        # Basic logging
-        logger.info(
-            f"Running {self.__class__.__name__} with experiment_id: {self.experiment_id}"
-        )
-
-        # Pipeline-specific logging
-        if additional_logging:
-            additional_logging()
-
-        outputs_dir = Path(self.config.pipeline.get("outputs_dir", "outputs"))
-        if self.reporter is None:
-            self.reporter = RunReporter(
-                base_dir=outputs_dir,
-                pipeline_slug=self.pipeline_slug,
-                workflow_name=self.workflow_name,
-                experiment_id=self.experiment_id,
-                console=self.console,
-            )
-        self.reporter.start(self.config)
-
-        # Start printer and update workflow
-        self._start_printer()
-        if self.printer:
-            self.printer.update_item(
-                "workflow",
-                f"Workflow: {self.workflow_name}",
-                is_done=True,
-                hide_checkmark=True,
-            )
-
-        # Create trace context
-        trace_metadata = {
-            "experiment_id": self.experiment_id,
-            "includes_sensitive_data": "true" if self.trace_sensitive else "false",
-        }
-        return self.trace_context(self.workflow_name, metadata=trace_metadata)
-
-    def _setup_tracing(self) -> None:
-        """Setup tracing configuration with user-friendly output.
-
-        Subclasses can override this method to add pipeline-specific information.
-        """
-        if self.enable_tracing:
-            pipeline_name = self.__class__.__name__.replace("Pipeline", "")
-            self.console.print(f"🍌 Starting {pipeline_name} Pipeline with Tracing")
-            self.console.print(f"🔧 Provider: {self.config.provider}")
-            self.console.print(f"🤖 Model: {self.config.llm.model_name}")
-            self.console.print("🔍 Tracing: Enabled")
-            self.console.print(
-                f"🔒 Sensitive Data in Traces: {'Yes' if self.trace_sensitive else 'No'}"
-            )
-            self.console.print(f"🏷️ Workflow: {self.workflow_name}")
-        else:
-            pipeline_name = self.__class__.__name__.replace("Pipeline", "")
-            self.console.print(f"🍌 Starting {pipeline_name} Pipeline")
-            self.console.print(f"🔧 Provider: {self.config.provider}")
-            self.console.print(f"🤖 Model: {self.config.llm.model_name}")
-
-    def trace_context(self, name: str, metadata: Optional[Dict[str, Any]] = None):
-        """Create a trace context - delegates to RuntimeTracker."""
-        return self.runtime_tracker.trace_context(name, metadata=metadata)
-
-    def span_context(self, span_factory, **kwargs):
-        """Create a span context - delegates to RuntimeTracker."""
-        return self.runtime_tracker.span_context(span_factory, **kwargs)
-
-    async def agent_step(
-        self,
-        agent,
-        instructions: str,
-        span_name: str,
-        span_type: str = "agent",
-        output_model: Optional[type[BaseModel]] = None,
-        sync: bool = False,
-        printer_key: Optional[str] = None,
-        printer_title: Optional[str] = None,
-        printer_group_id: Optional[str] = None,
-        printer_border_style: Optional[str] = None,
-        **span_kwargs
-    ) -> Any:
-        """Run an agent with span tracking and optional output parsing.
-
-        This method delegates to AgentExecutor from the flow module.
-
-        Args:
-            agent: The agent to run
-            instructions: Instructions/prompt for the agent
-            span_name: Name for the span
-            span_type: Type of span - "agent" or "function"
-            output_model: Optional pydantic model to parse output
-            sync: Whether to run synchronously
-            printer_key: Optional key for printer updates (will be prefixed with iter:N:)
-            printer_title: Optional title for printer display
-            printer_group_id: Optional group to nest this item in
-            printer_border_style: Optional border color
-            **span_kwargs: Additional kwargs for span (e.g., tools, input)
-
-        Returns:
-            Parsed output if output_model provided, otherwise Runner result
-        """
-        return await self.executor.agent_step(
-            agent=agent,
-            instructions=instructions,
-            span_name=span_name,
-            span_type=span_type,
-            output_model=output_model,
-            sync=sync,
-            printer_key=printer_key,
-            printer_title=printer_title,
-            printer_group_id=printer_group_id,
-            printer_border_style=printer_border_style,
-            **span_kwargs
-        )
-
-    def update_printer(
-        self,
-        key: str,
-        message: str,
-        is_done: bool = False,
-        hide_checkmark: bool = False,
-        title: Optional[str] = None,
-        border_style: Optional[str] = None,
-        group_id: Optional[str] = None,
-    ) -> None:
-        """Update printer status if printer is active.
-
-        This method delegates to RuntimeTracker.
-
-        Args:
-            key: Status key to update
-            message: Status message
-            is_done: Whether the task is complete
-            hide_checkmark: Whether to hide the checkmark when done
-            title: Optional panel title
-            border_style: Optional border color
-            group_id: Optional group to nest this item in
-        """
-        self.runtime_tracker.update_printer(
-            key,
-            message,
-            is_done=is_done,
-            hide_checkmark=hide_checkmark,
-            title=title,
-            border_style=border_style,
-            group_id=group_id
-        )
 
     def start_group(
         self,
@@ -421,6 +230,103 @@ class BasePipeline:
                 title=title,
             )
 
+    # ============================================
+    # Initialization & Setup
+    # ============================================
+
+    def _initialize_run(self, additional_logging=None):
+        """Initialize a pipeline run with logging, printer, and tracing.
+
+        Args:
+            additional_logging: Optional callable for pipeline-specific logging
+
+        Returns:
+            Trace context manager for the workflow
+        """
+        # Basic logging
+        logger.info(
+            f"Running {self.__class__.__name__} with experiment_id: {self.experiment_id}"
+        )
+
+        # Pipeline-specific logging
+        if additional_logging:
+            additional_logging()
+
+        outputs_dir = Path(self.config.pipeline.get("outputs_dir", "outputs"))
+        if self.reporter is None:
+            self.reporter = RunReporter(
+                base_dir=outputs_dir,
+                pipeline_slug=self.pipeline_slug,
+                workflow_name=self.workflow_name,
+                experiment_id=self.experiment_id,
+                console=self.console,
+            )
+        self.reporter.start(self.config)
+
+        # Start printer and update workflow
+        self.start_printer()
+        if self.printer:
+            self.printer.update_item(
+                "workflow",
+                f"Workflow: {self.workflow_name}",
+                is_done=True,
+                hide_checkmark=True,
+            )
+
+        # Create trace context
+        trace_metadata = {
+            "experiment_id": self.experiment_id,
+            "includes_sensitive_data": "true" if self.trace_sensitive else "false",
+        }
+        return self.trace_context(self.workflow_name, metadata=trace_metadata)
+
+    def _setup_tracing(self) -> None:
+        """Setup tracing configuration with user-friendly output.
+
+        Subclasses can override this method to add pipeline-specific information.
+        """
+        if self.enable_tracing:
+            pipeline_name = self.__class__.__name__.replace("Pipeline", "")
+            self.console.print(f"🍌 Starting {pipeline_name} Pipeline with Tracing")
+            self.console.print(f"🔧 Provider: {self.config.provider}")
+            self.console.print(f"🤖 Model: {self.config.llm.model_name}")
+            self.console.print("🔍 Tracing: Enabled")
+            self.console.print(
+                f"🔒 Sensitive Data in Traces: {'Yes' if self.trace_sensitive else 'No'}"
+            )
+            self.console.print(f"🏷️ Workflow: {self.workflow_name}")
+        else:
+            pipeline_name = self.__class__.__name__.replace("Pipeline", "")
+            self.console.print(f"🍌 Starting {pipeline_name} Pipeline")
+            self.console.print(f"🔧 Provider: {self.config.provider}")
+            self.console.print(f"🤖 Model: {self.config.llm.model_name}")
+
+    def trace_context(self, name: str, metadata: Optional[Dict[str, Any]] = None):
+        """Create a trace context - delegates to RuntimeTracker."""
+        return self.runtime_tracker.trace_context(name, metadata=metadata)
+
+    def span_context(self, span_factory, **kwargs):
+        """Create a span context - delegates to RuntimeTracker."""
+        return self.runtime_tracker.span_context(span_factory, **kwargs)
+
+    async def agent_step(self, *args, **kwargs) -> Any:
+        """Run an agent with span tracking and optional output parsing.
+
+        Delegates to AgentExecutor.agent_step(). See AgentExecutor.agent_step() for full documentation.
+        """
+        return await self.executor.agent_step(*args, **kwargs)
+
+    def update_printer(self, *args, **kwargs) -> None:
+        """Update printer status if printer is active.
+
+        Delegates to RuntimeTracker.update_printer(). See RuntimeTracker.update_printer() for full documentation.
+        """
+        self.runtime_tracker.update_printer(*args, **kwargs)
+
+    # ============================================
+    # Context Managers & Utilities
+    # ============================================
+
     @contextmanager
     def run_context(self, additional_logging: Optional[Callable] = None):
         """Context manager for run lifecycle handling.
@@ -436,51 +342,20 @@ class BasePipeline:
         """
         # Start pipeline timer for constraint checking
         self.start_time = time.time()
-        if hasattr(self, '_iteration_manager') and self._iteration_manager:
-            self._iteration_manager.start_timer()
 
         trace_ctx = self._initialize_run(additional_logging)
         try:
             with trace_ctx:
                 yield trace_ctx
         finally:
-            self._stop_printer()
+            self.stop_printer()
 
-    async def run_span_step(
-        self,
-        step_key: str,
-        callable_or_coro: Union[Callable, Any],
-        span_name: str,
-        span_type: str = "function",
-        start_message: Optional[str] = None,
-        done_message: Optional[str] = None,
-        **span_kwargs
-    ) -> Any:
+    async def run_span_step(self, *args, **kwargs) -> Any:
         """Execute a step with span context and printer updates.
 
-        This method delegates to AgentExecutor from the flow module.
-
-        Args:
-            step_key: Printer status key
-            callable_or_coro: Callable or coroutine to execute
-            span_name: Name for the span
-            span_type: Type of span - "agent" or "function"
-            start_message: Optional start message for printer
-            done_message: Optional completion message for printer
-            **span_kwargs: Additional kwargs for span (e.g., tools, input)
-
-        Returns:
-            Result from callable_or_coro
+        Delegates to AgentExecutor.run_span_step(). See AgentExecutor.run_span_step() for full documentation.
         """
-        return await self.executor.run_span_step(
-            step_key=step_key,
-            callable_or_coro=callable_or_coro,
-            span_name=span_name,
-            span_type=span_type,
-            start_message=start_message,
-            done_message=done_message,
-            **span_kwargs
-        )
+        return await self.executor.run_span_step(*args, **kwargs)
 
     def prepare_query(
         self,
@@ -517,13 +392,13 @@ class BasePipeline:
         """Log a message using the configured logger."""
         logger.info(message)
 
+    # ============================================
+    # Execution Entry Points
+    # ============================================
+
     def run_sync(self, *args, **kwargs):
         """Synchronous wrapper for the async run method."""
         return asyncio.run(self.run(*args, **kwargs))
-
-    # ============================================
-    # TIER 1: Template Method (Fixed Structure)
-    # ============================================
 
     async def run(self, query: Any = None) -> Any:
         """Template method - DO NOT override in subclasses.
@@ -564,7 +439,7 @@ class BasePipeline:
             return final_result
 
     # ============================================
-    # TIER 1: Lifecycle Hook Methods
+    # Lifecycle Hook Methods (Override in Subclasses)
     # ============================================
 
     async def initialize_pipeline(self, query: Any) -> None:
@@ -648,7 +523,7 @@ class BasePipeline:
         return result
 
     # ============================================
-    # TIER 2: Abstract Execute Method
+    # Abstract Execute Method (Must Implement in Subclasses)
     # ============================================
 
     async def execute(self) -> Any:
@@ -688,7 +563,7 @@ class BasePipeline:
         raise NotImplementedError("Subclasses must implement execute()")
 
     # ============================================
-    # TIER 3: Helper Utilities (Opt-in Composition)
+    # Workflow Helper Methods
     # ============================================
 
     async def run_iterative_loop(
@@ -699,21 +574,91 @@ class BasePipeline:
     ) -> Any:
         """Execute standard iterative loop pattern.
 
-        Delegates to WorkflowHelpers.run_iterative_loop.
-
         Args:
             iteration_body: Async function(iteration, group_id) -> result
             final_body: Optional async function(final_group_id) -> result
-            should_continue: Optional custom condition (default: _should_continue_iteration)
+            should_continue: Optional custom condition (default: checks max iterations/time)
 
         Returns:
             Result from final_body if provided, else None
         """
-        return await self.workflow_helpers.run_iterative_loop(
-            iteration_body=iteration_body,
-            final_body=final_body,
-            should_continue=should_continue,
-        )
+        should_continue_fn = should_continue or self._should_continue_iteration
+
+        while should_continue_fn():
+            # Begin iteration
+            iteration = self.context.begin_iteration()
+            group_id = f"{self.ITERATION_GROUP_PREFIX}-{iteration.index}"
+            self.iteration = iteration.index
+
+            # Start group
+            self.start_group(
+                group_id,
+                title=f"Iteration {iteration.index}",
+                border_style="white",
+                iteration=iteration.index,
+            )
+
+            # Trigger before hooks
+            await self._hook_registry.trigger(
+                "before_iteration",
+                context=self.context,
+                iteration=iteration,
+                group_id=group_id
+            )
+
+            try:
+                await iteration_body(iteration, group_id)
+            finally:
+                # Trigger after hooks
+                await self._hook_registry.trigger(
+                    "after_iteration",
+                    context=self.context,
+                    iteration=iteration,
+                    group_id=group_id
+                )
+                # End iteration
+                self.context.mark_iteration_complete()
+                self.end_group(group_id, is_done=True)
+
+            # Check if state indicates completion
+            if self.state and self.state.complete:
+                break
+
+        # Execute final body if provided
+        result = None
+        if final_body:
+            final_group = self.FINAL_GROUP_ID
+            self.start_group(final_group, title="Final Report", border_style="white")
+            result = await final_body(final_group)
+            self.end_group(final_group, is_done=True)
+
+        return result
+
+    def _should_continue_iteration(self) -> bool:
+        """Check if iteration should continue based on constraints.
+
+        Returns:
+            True if should continue, False otherwise
+        """
+        # Check state completion
+        if self.state and self.state.complete:
+            return False
+
+        # Check max iterations
+        if self.iteration >= self.max_iterations:
+            logger.info("\n=== Ending Iteration Loop ===")
+            logger.info(f"Reached maximum iterations ({self.max_iterations})")
+            return False
+
+        # Check max time
+        if self.start_time is not None:
+            elapsed_minutes = (time.time() - self.start_time) / 60
+            if elapsed_minutes >= self.max_time_minutes:
+                logger.info("\n=== Ending Iteration Loop ===")
+                logger.info(f"Reached maximum time ({self.max_time_minutes} minutes)")
+                return False
+
+        return True
 
     async def run_custom_group(
         self,
@@ -724,8 +669,6 @@ class BasePipeline:
     ) -> Any:
         """Execute code within a custom printer group.
 
-        Delegates to WorkflowHelpers.run_custom_group.
-
         Args:
             group_id: Unique group identifier
             title: Display title for the group
@@ -735,12 +678,12 @@ class BasePipeline:
         Returns:
             Result from body()
         """
-        return await self.workflow_helpers.run_custom_group(
-            group_id=group_id,
-            title=title,
-            body=body,
-            border_style=border_style,
-        )
+        self.start_group(group_id, title=title, border_style=border_style)
+        try:
+            result = await body()
+            return result
+        finally:
+            self.end_group(group_id, is_done=True)
 
     async def run_parallel_steps(
         self,
@@ -749,8 +692,6 @@ class BasePipeline:
     ) -> Dict[str, Any]:
         """Execute multiple steps in parallel.
 
-        Delegates to WorkflowHelpers.run_parallel_steps.
-
         Args:
             steps: Dict mapping step_name -> async callable
             group_id: Optional group to nest steps in
@@ -758,10 +699,16 @@ class BasePipeline:
         Returns:
             Dict mapping step_name -> result
         """
-        return await self.workflow_helpers.run_parallel_steps(
-            steps=steps,
-            group_id=group_id,
-        )
+        async def run_step(name: str, fn: Callable):
+            key = f"{group_id}:{name}" if group_id else name
+            self.update_printer(key, f"Running {name}...", group_id=group_id)
+            result = await fn()
+            self.update_printer(key, f"Completed {name}", is_done=True, group_id=group_id)
+            return name, result
+
+        tasks = [run_step(name, fn) for name, fn in steps.items()]
+        completed = await asyncio.gather(*tasks)
+        return dict(completed)
 
     async def run_if(
         self,
@@ -771,8 +718,6 @@ class BasePipeline:
     ) -> Any:
         """Conditional execution helper.
 
-        Delegates to WorkflowHelpers.run_if.
-
         Args:
             condition: Boolean or callable returning bool
             body: Execute if condition is True
@@ -781,11 +726,12 @@ class BasePipeline:
         Returns:
             Result from executed body
         """
-        return await self.workflow_helpers.run_if(
-            condition=condition,
-            body=body,
-            else_body=else_body,
-        )
+        cond_result = condition() if callable(condition) else condition
+        if cond_result:
+            return await body()
+        elif else_body:
+            return await else_body()
+        return None
 
     async def run_until(
         self,
@@ -795,8 +741,6 @@ class BasePipeline:
     ) -> List[Any]:
         """Execute body repeatedly until condition is met.
 
-        Delegates to WorkflowHelpers.run_until.
-
         Args:
             condition: Callable returning True to stop
             body: Async function(iteration_number) -> result
@@ -805,14 +749,21 @@ class BasePipeline:
         Returns:
             List of results from each iteration
         """
-        return await self.workflow_helpers.run_until(
-            condition=condition,
-            body=body,
-            max_iterations=max_iterations,
-        )
+        results = []
+        iteration = 0
+
+        while not condition():
+            if max_iterations and iteration >= max_iterations:
+                break
+
+            result = await body(iteration)
+            results.append(result)
+            iteration += 1
+
+        return results
 
     # ============================================
-    # Generic Utilities
+    # Integration with Runner Module
     # ============================================
 
     def _record_structured_payload(self, value: object, context_label: Optional[str] = None) -> None:
@@ -888,7 +839,7 @@ class BasePipeline:
         )
 
     # ============================================
-    # Pattern Templates (High-Level Workflows)
+    # High-Level Workflow Patterns
     # ============================================
 
     async def run_manager_tool_loop(
@@ -922,7 +873,7 @@ class BasePipeline:
         )
 
     # ============================================
-    # Hook Registry System (Event-Driven)
+    # Event Hook System
     # ============================================
 
     def register_hook(
