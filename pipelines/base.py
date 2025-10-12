@@ -8,7 +8,7 @@ from loguru import logger
 from rich.console import Console
 
 from agents.tracing.create import function_span
-from agentz.configuration.base import BaseConfig, resolve_config
+from agentz.utils.config import BaseConfig, resolve_config
 from agentz.runner import (
     AgentExecutor,
     RuntimeTracker,

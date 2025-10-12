@@ -1,4 +1,4 @@
-from agentz.configuration.base import BaseConfig
+from agentz.utils.config import BaseConfig
 from pipelines.data_scientist import DataScientistPipeline
 
 

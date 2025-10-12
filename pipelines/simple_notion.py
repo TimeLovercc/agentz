@@ -7,7 +7,7 @@ from agentz.runner import auto_trace
 from agentz.profiles.base import load_all_profiles
 from pipelines.base import BasePipeline
 from agentz.profiles.base import ToolAgentOutput
-from agentz.configuration.base import BaseConfig
+from agentz.utils.config import BaseConfig
 from agentz.llm.llm_setup import model_supports_json_and_tool_calls
 from agentz.utils import create_type_parser
 from agents.mcp import MCPServer, MCPServerStdio, MCPServerSse
