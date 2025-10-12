@@ -451,20 +451,6 @@ def get_agent_spec(cfg: BaseConfig, name: str, required: bool = True) -> Optiona
     return result
 
 
-def _expand_env_vars(obj: Any) -> Any:
-    """Recursively expand environment variables in strings (${VAR} format)."""
-    if isinstance(obj, str):
-        # Expand ${VAR} patterns
-        import re
-        def replace_env(match):
-            var_name = match.group(1)
-            return os.getenv(var_name, match.group(0))
-        return re.sub(r'\$\{([^}]+)\}', replace_env, obj)
-    elif isinstance(obj, Mapping):
-        return {k: _expand_env_vars(v) for k, v in obj.items()}
-    elif isinstance(obj, (list, tuple)):
-        return type(obj)(_expand_env_vars(item) for item in obj)
-    return obj
 
 
 def _resolve_relative_paths(data: Dict[str, Any], base_dir: Path) -> Dict[str, Any]:
@@ -555,7 +541,7 @@ def resolve_config(spec: Union[str, Path, Mapping[str, Any], BaseConfig]) -> Bas
         )
 
     # 2. Expand environment variables in all string fields
-    raw = _expand_env_vars(raw)
+    raw = _substitute_env_vars(raw)
 
     # 3. Resolve relative paths if we have a base directory
     if base_dir:
