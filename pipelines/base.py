@@ -2,7 +2,7 @@ import asyncio
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, Union
+from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, Tuple, Union
 
 from loguru import logger
 from rich.console import Console
@@ -357,6 +357,83 @@ class BasePipeline:
         """
         return await self.executor.run_span_step(*args, **kwargs)
 
+    # ============================================
+    # Iteration & Group Management
+    # ============================================
+
+    def begin_iteration(
+        self,
+        title: Optional[str] = None,
+        border_style: str = "white"
+    ) -> Tuple[Any, str]:
+        """Begin a new iteration with its associated group.
+
+        Combines context.begin_iteration() + start_group() into a single call.
+
+        Args:
+            title: Optional custom title (default: "Iteration {index}")
+            border_style: Border style for the group (default: "white")
+
+        Returns:
+            Tuple of (iteration_record, group_id)
+        """
+        iteration, group_id = self.context.begin_iteration()
+        self.iteration = iteration.index
+
+        display_title = title or f"Iteration {iteration.index}"
+        self.start_group(
+            group_id,
+            title=display_title,
+            border_style=border_style,
+            iteration=iteration.index,
+        )
+
+        return iteration, group_id
+
+    def end_iteration(self, group_id: str, is_done: bool = True) -> None:
+        """End the current iteration and its associated group.
+
+        Combines context.mark_iteration_complete() + end_group() into a single call.
+
+        Args:
+            group_id: The group ID to close
+            is_done: Whether the iteration completed successfully (default: True)
+        """
+        self.context.mark_iteration_complete()
+        self.end_group(group_id, is_done=is_done)
+
+    def begin_final_report(
+        self,
+        title: str = "Final Report",
+        border_style: str = "white"
+    ) -> str:
+        """Begin the final report phase with its associated group.
+
+        Combines context.begin_final_report() + start_group() into a single call.
+
+        Args:
+            title: Title for the final report group (default: "Final Report")
+            border_style: Border style for the group (default: "white")
+
+        Returns:
+            The final report group_id
+        """
+        _, group_id = self.context.begin_final_report()
+        self.start_group(group_id, title=title, border_style=border_style)
+        return group_id
+
+    def end_final_report(self, group_id: str, is_done: bool = True) -> None:
+        """End the final report phase and its associated group.
+
+        Combines context.mark_final_complete() + end_group() into a single call.
+
+        Args:
+            group_id: The final report group ID to close
+            is_done: Whether the final report completed successfully (default: True)
+        """
+        self.context.mark_final_complete()
+        self.end_group(group_id, is_done=is_done)
+
     def prepare_query(
         self,
         content: str,
@@ -592,18 +669,8 @@ class BasePipeline:
         should_continue_fn = should_continue or self._should_continue_iteration
 
         while should_continue_fn():
-            # Begin iteration
-            iteration = self.context.begin_iteration()
-            group_id = f"{self.ITERATION_GROUP_PREFIX}-{iteration.index}"
-            self.iteration = iteration.index
-
-            # Start group
-            self.start_group(
-                group_id,
-                title=f"Iteration {iteration.index}",
-                border_style="white",
-                iteration=iteration.index,
-            )
+            # Begin iteration with its group
+            iteration, group_id = self.begin_iteration()
 
             # Trigger before hooks
             await self._hook_registry.trigger(
@@ -623,9 +690,8 @@ class BasePipeline:
                     iteration=iteration,
                     group_id=group_id
                 )
-                # End iteration
-                self.context.mark_iteration_complete()
-                self.end_group(group_id, is_done=True)
+                # End iteration with its group
+                self.end_iteration(group_id)
 
             # Check if state indicates completion
             if self.state and self.state.complete:
@@ -634,10 +700,9 @@ class BasePipeline:
         # Execute final body if provided
         result = None
         if final_body:
-            final_group = self.FINAL_GROUP_ID
-            self.start_group(final_group, title="Final Report", border_style="white")
+            final_group = self.begin_final_report()
             result = await final_body(final_group)
-            self.end_group(final_group, is_done=True)
+            self.end_final_report(final_group)
 
         return result
 

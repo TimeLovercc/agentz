@@ -40,26 +40,29 @@ class ContextAgent(Agent[TContext]):
         self._role = None  # Optional role identifier for automatic iteration tracking
 
     @classmethod
-    def from_profile(cls, profile: Any, llm: str) -> "ContextAgent":
-        """Create a ContextAgent from a Profile instance.
+    def from_profile(cls, pipeline: Any, role: str, llm: str) -> "ContextAgent":
+        """Create a ContextAgent from a pipeline context and role.
 
-        Automatically derives agent name from the profile's _key attribute.
-        Example: profiles["observe"] has _key="observe" → agent name becomes "observe_agent"
+        Automatically looks up the profile from pipeline.context.profiles[role],
+        derives agent name, and binds the agent to the pipeline with the role.
 
         Args:
-            profile: Profile instance with instructions, schemas, tools (from profiles dict)
+            pipeline: Pipeline instance (must have context.profiles attribute)
+            role: Role name that maps to a profile key (e.g., "observe", "evaluate")
             llm: LLM model name (e.g., "gpt-4", "claude-3-5-sonnet")
 
         Returns:
-            ContextAgent instance configured from the profile
+            ContextAgent instance configured from the profile and bound to pipeline
 
         Example:
-            agent = ContextAgent.from_profile(profiles["observe"], "gpt-4")
-            # Creates agent with name="observe_agent"
+            agent = ContextAgent.from_profile(self, "observe", "gpt-4")
+            # Looks up profiles["observe"], creates agent, and binds it to pipeline
         """
-        # Auto-derive name from profile key
-        profile_key = getattr(profile, "_key", "agent")
-        agent_name = profile_key + "_agent" if profile_key != "agent" else "agent"
+        # Look up profile from pipeline's context
+        profile = pipeline.context.profiles[role]
+
+        # Auto-derive name from role
+        agent_name = role + "_agent" if role != "agent" else "agent"
 
         # Get tools, default to empty list if None
         # Note: Tools in profiles are currently string names, not resolved objects
@@ -68,7 +71,7 @@ class ContextAgent(Agent[TContext]):
         # TODO: Implement tool resolution to make tools actually work
         tools = []
 
-        return cls(
+        agent = cls(
             name=agent_name,
             instructions=profile.instructions,
             output_model=getattr(profile, "output_schema", None),
@@ -76,6 +79,12 @@ class ContextAgent(Agent[TContext]):
             tools=tools,
             model=llm,
         )
+
+        # Bind agent to pipeline with role
+        agent._pipeline = pipeline
+        agent._role = role
+
+        return agent
 
     @staticmethod
     def _coerce_output_model(candidate: Any) -> type[BaseModel] | None:

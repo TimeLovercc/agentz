@@ -40,16 +40,15 @@ class DataScientistPipeline(BasePipeline):
 
         # Initialize context and profiles
         self.context = Context(["profiles", "states"])
-        profiles = self.context.profiles
         llm = self.config.llm.main_model
 
-        # Create manager agents as explicit attributes
-        self.observe_agent = ContextAgent.from_profile(profiles["observe"], llm)
-        self.evaluate_agent = ContextAgent.from_profile(profiles["evaluate"], llm)
-        self.routing_agent = ContextAgent.from_profile(profiles["routing"], llm)
-        self.writer_agent = ContextAgent.from_profile(profiles["writer"], llm)
+        # Create manager agents - automatically bound to pipeline with role
+        self.observe_agent = ContextAgent.from_profile(self, "observe", llm)
+        self.evaluate_agent = ContextAgent.from_profile(self, "evaluate", llm)
+        self.routing_agent = ContextAgent.from_profile(self, "routing", llm)
+        self.writer_agent = ContextAgent.from_profile(self, "writer", llm)
 
-        # Create tool agents as dictionary
+        # Create tool agents as dictionary - automatically bound to pipeline
         tool_names = [
             "data_loader",
             "data_analysis",
@@ -59,25 +58,9 @@ class DataScientistPipeline(BasePipeline):
             "visualization",
         ]
         self.tool_agents = {
-            f"{name}_agent": ContextAgent.from_profile(profiles[name], llm)
+            f"{name}_agent": ContextAgent.from_profile(self, name, llm)
             for name in tool_names
         }
-
-        # Bind all agents to this pipeline for context-aware execution
-        self.observe_agent._pipeline = self
-        self.observe_agent._role = "observe"
-
-        self.evaluate_agent._pipeline = self
-        self.evaluate_agent._role = "evaluate"
-
-        self.routing_agent._pipeline = self
-        self.routing_agent._role = "routing"
-
-        self.writer_agent._pipeline = self
-        self.writer_agent._role = "writer"
-
-        for agent in self.tool_agents.values():
-            agent._pipeline = self
 
     async def execute(self) -> Any:
         """Execute data science workflow - full implementation in one function."""
@@ -85,11 +68,8 @@ class DataScientistPipeline(BasePipeline):
 
         # Iterative loop: observe → evaluate → route → tools
         while self.iteration < self.max_iterations and not self.context.state.complete:
-            # Begin iteration
-            iteration = self.context.begin_iteration()
-            group_id = f"iter-{iteration.index}"
-            self.iteration = iteration.index
-            self.start_group(group_id, title=f"Iteration {iteration.index}", border_style="white", iteration=iteration.index)
+            # Begin iteration with its group
+            _, group_id = self.begin_iteration()
 
             query = self.context.state.query
 
@@ -101,19 +81,17 @@ class DataScientistPipeline(BasePipeline):
                 routing_output = await self.routing_agent(self._serialize_output(evaluate_output), group_id=group_id)
                 await self._execute_tools(routing_output, self.tool_agents, group_id)
 
-            # End iteration
-            self.context.mark_iteration_complete()
-            self.end_group(group_id, is_done=True)
+            # End iteration with its group
+            self.end_iteration(group_id)
 
             if self.context.state.complete:
                 break
 
         # Final report
-        final_group = "iter-final"
-        self.start_group(final_group, title="Final Report", border_style="white")
+        final_group = self.begin_final_report()
         self.update_printer("research", "Research workflow complete", is_done=True)
 
         findings = self.context.state.findings_text()
         await self.writer_agent(findings, group_id=final_group)
 
-        self.end_group(final_group, is_done=True)
+        self.end_final_report(final_group)
