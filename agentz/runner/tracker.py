@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 
 from agents.tracing.create import agent_span, function_span, trace
 from agentz.utils import Printer
-from agentz.context.pipeline_context import PipelineDataStore
+from agentz.context.data_store import DataStore
 from agentz.artifacts import RunReporter
 
 # Context variable to store the current runtime tracker
@@ -52,7 +52,7 @@ class RuntimeTracker:
         self.trace_sensitive = trace_sensitive
         self.iteration = iteration
         self.reporter = reporter
-        self.data_store = PipelineDataStore(experiment_id=experiment_id)
+        self.data_store = DataStore(experiment_id=experiment_id)
 
     def trace_context(self, name: str, metadata: Optional[Dict[str, Any]] = None):
         """Create a trace context manager.
@@ -176,13 +176,13 @@ def get_current_tracker() -> Optional[RuntimeTracker]:
     return _current_runtime_tracker.get()
 
 
-def get_current_data_store() -> Optional[PipelineDataStore]:
+def get_current_data_store() -> Optional[DataStore]:
     """Get the data store from the current runtime tracker (if any).
 
     This is a convenience function for tools that need to access the data store.
 
     Returns:
-        The current PipelineDataStore or None if not in a runtime context
+        The current DataStore or None if not in a runtime context
     """
     tracker = get_current_tracker()
     return tracker.data_store if tracker else None

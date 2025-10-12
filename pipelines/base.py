@@ -602,37 +602,12 @@ class BasePipeline:
         - Cleanup operations
         - State aggregation
 
-        Default implementation:
-        - Auto-saves final report to global memory if configured
-
         Override this for custom post-execution logic.
 
         Args:
             result: The return value from execute()
         """
-        # Auto-save to global memory if enabled
-        if self.config.pipeline.get("save_to_memory", False):
-            await self._save_report_to_memory()
-
-    async def _save_report_to_memory(self) -> None:
-        """Save final report to global memory (if available)."""
-        try:
-            from agentz.context.global_memory import global_memory
-
-            if self.state:
-                final_report = self.state.final_report
-                if final_report:
-                    timestamped_report = f"Experiment {self.experiment_id}\n\n{final_report.strip()}"
-                    global_memory.store(
-                        key=f"report_{self.experiment_id}",
-                        value=timestamped_report,
-                        tags=["research_report"],
-                    )
-                    self.update_printer("memory", "Report saved to memory", is_done=True)
-        except ImportError:
-            logger.debug("global_memory not available, skipping report save")
-        except Exception as exc:
-            logger.debug(f"Failed to save report to memory: {exc}")
+        pass
 
     async def finalize(self, result: Any) -> Any:
         """Finalization phase - prepare final return value.

@@ -25,7 +25,7 @@ class DataStoreEntry:
         return sys.getsizeof(self.value) / 1024 / 1024
 
 
-class PipelineDataStore:
+class DataStore:
     """Thread-safe data store for sharing objects within a pipeline run.
 
     Designed for storing:
@@ -42,7 +42,7 @@ class PipelineDataStore:
     """
 
     def __init__(self, experiment_id: Optional[str] = None):
-        """Initialize the pipeline data store.
+        """Initialize the data store.
 
         Args:
             experiment_id: Optional experiment ID for tracking
@@ -50,7 +50,7 @@ class PipelineDataStore:
         self._store: Dict[str, DataStoreEntry] = {}
         self._lock = threading.RLock()
         self.experiment_id = experiment_id
-        logger.debug(f"Initialized PipelineDataStore for experiment: {experiment_id}")
+        logger.debug(f"Initialized DataStore for experiment: {experiment_id}")
 
     def set(
         self,

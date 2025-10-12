@@ -6,13 +6,13 @@ import pandas as pd
 import numpy as np
 from agents import function_tool
 from agents.run_context import RunContextWrapper
-from agentz.context.pipeline_context import PipelineDataStore
+from agentz.context.data_store import DataStore
 from .helpers import load_or_get_dataframe
 from loguru import logger
 
 
 @function_tool
-async def analyze_data(ctx: RunContextWrapper[PipelineDataStore], file_path: Optional[str] = None, target_column: str = None) -> Union[Dict[str, Any], str]:
+async def analyze_data(ctx: RunContextWrapper[DataStore], file_path: Optional[str] = None, target_column: str = None) -> Union[Dict[str, Any], str]:
     """Performs comprehensive exploratory data analysis on a dataset.
 
     This tool automatically uses the current dataset from the pipeline context.
