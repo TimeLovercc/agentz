@@ -13,14 +13,14 @@ from sklearn.metrics import (
 )
 from agents import function_tool
 from agents.run_context import RunContextWrapper
-from agentz.memory.pipeline_context import PipelineDataStore
+from agentz.context.data_store import DataStore
 from .helpers import load_or_get_dataframe
 from loguru import logger
 
 
 @function_tool
 async def evaluate_model(
-    ctx: RunContextWrapper[PipelineDataStore],
+    ctx: RunContextWrapper[DataStore],
     target_column: str,
     file_path: Optional[str] = None,
     model_type: str = "random_forest",

@@ -1,116 +1,151 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, Optional
 
-from agentz.agents.manager_agents.memory_agent import MemoryAgentOutput
-from agentz.agents.registry import create_agents
+from agentz.agent.base import ContextAgent
+from agentz.context.conversation import create_conversation_state
+from agentz.context.context import Context
+from agentz.profiles.manager.memory import MemoryAgentOutput
+from agentz.profiles.manager.evaluate import EvaluateOutput
+from agentz.profiles.manager.routing import AgentSelectionPlan
+from agentz.profiles.base import load_all_profiles
 from pipelines.data_scientist import DataScientistPipeline
-from pipelines.flow_runner import FlowNode, FlowRunner, IterationFlow
-from agentz.flow.runtime_objects import AgentCapability, PipelineContext
 
 
 class DataScientistMemoryPipeline(DataScientistPipeline):
     """Data scientist pipeline variant that maintains iterative memory compression."""
 
     def __init__(self, config):
-        # Initialise base pipeline (sets up conversation, agents, and runner)
-        super().__init__(config)
+        # Don't call super().__init__ yet - we need to customize
+        # Call BasePipeline.__init__ directly
+        from pipelines.base import BasePipeline
+        BasePipeline.__init__(self, config)
 
-        # Augment manager agents with memory agent
-        self.agents["memory_agent"] = AgentCapability("memory_agent", create_agents("memory_agent", config))
+        profiles = load_all_profiles()
+        state = create_conversation_state(profiles=profiles)
+        llm = self.config.llm.main_model
 
-        # Rebuild flow with memory node included
-        self.iteration_flow = IterationFlow(
-            nodes=self._build_iteration_nodes(),
-            loop_condition=self._should_continue_loop,
-        )
-        self.final_nodes = self._build_final_nodes()
-        self.flow_runner = FlowRunner(
-            self,
-            agents=self.agents,
-            iteration_flow=self.iteration_flow,
-            final_nodes=self.final_nodes,
+        # Centralized context engine with state and behaviors (including memory)
+        self.context = Context(
+            state=state,
+            behaviors=["observe", "evaluate", "route", "writer", "memory"],
+            config=config,
         )
 
-    # ------------------------------------------------------------------
-    # Conversation helpers
-    # ------------------------------------------------------------------
-    def _build_observation_payload(self, context: PipelineContext) -> Dict[str, Any]:
-        state = context.state
-        history = state.history_with_summary()
-        if not history:
-            history = "No previous actions, findings or thoughts available."
-        return {
-            "ITERATION": state.current_iteration.index,
-            "QUERY": state.query,
-            "HISTORY": history,
+        # Manager agents with memory support
+        self.observe_agent = ContextAgent.from_profile(profiles["observe"], llm)
+        self.evaluate_agent = ContextAgent.from_profile(profiles["evaluate"], llm)
+        self.routing_agent = ContextAgent.from_profile(profiles["routing"], llm)
+        self.writer_agent = ContextAgent.from_profile(profiles["writer"], llm)
+        self.memory_agent = ContextAgent.from_profile(profiles["memory"], llm)
+
+        # Tool agents for specialized tasks
+        self.tool_agents: Dict[str, Any] = {
+            f"{name}_agent": ContextAgent.from_profile(profiles[name], llm)
+            for name in ["data_loader", "data_analysis", "preprocessing",
+                        "model_training", "evaluation", "visualization"]
         }
 
-    def _build_evaluation_payload(self, context: PipelineContext) -> Dict[str, Any]:
-        state = context.state
-        history = state.history_with_summary()
-        if not history:
-            history = "No previous actions, findings or thoughts available."
-        return {
-            "ITERATION": state.current_iteration.index,
-            "ELAPSED_MINUTES": f"{state.elapsed_minutes():.2f}",
-            "MAX_MINUTES": self.max_time_minutes,
-            "QUERY": state.query,
-            "HISTORY": history,
-        }
+        # Optional report configuration
+        self.report_length: Optional[str] = None
+        self.report_instructions: Optional[str] = None
 
-    def _build_routing_payload(self, context: PipelineContext) -> Dict[str, Any]:
-        state = context.state
-        history = state.history_with_summary()
-        if not history:
-            history = "No previous actions, findings or thoughts available."
-        gap = state.current_iteration.selected_gap or "No specific gap provided."
-        return {
-            "QUERY": state.query,
-            "GAP": gap,
-            "HISTORY": history,
-        }
+    async def execute(self) -> Any:
+        """Execute data science workflow with memory compression.
 
-    # ------------------------------------------------------------------
-    # Flow configuration with memory node
-    # ------------------------------------------------------------------
-    def _build_iteration_nodes(self) -> List[FlowNode]:
-        nodes = super()._build_iteration_nodes()
-        nodes.append(
-            FlowNode(
-                name="memory",
-                agent_key="memory_agent",
-                profile="memory_agent",
-                template="compression_iteration",
-                input_builder=self._build_memory_payload,
-                output_model=MemoryAgentOutput,
-                output_handler=self._handle_memory_output,
-                span_name="update_memory",
-                span_type="function",
-                printer_key="memory",
-                printer_title="Memory",
-                condition=self._should_run_memory_node,
+        This shows the full workflow:
+        1. Iterative loop with observe → evaluate → route → execute tools → memory compression
+        2. Final report generation with writer agent
+        """
+        self.update_printer("research", "Executing research workflow...")
+
+        return await self.run_iterative_loop(
+            iteration_body=self._iteration_step,
+            final_body=self._final_step
+        )
+
+    async def _iteration_step(self, iteration, group_id: str):
+        """Execute one iteration: observe → evaluate → route → tools → memory."""
+        # Step 1: Observe using behavior rendering
+        observe_instructions = self.context.render_behavior("observe", self.context.snapshot("observe"))
+        observe_result = await self.agent_step(
+            agent=self.observe_agent,
+            instructions=observe_instructions,
+            span_name="observe",
+            span_type="agent",
+            printer_key="observe",
+            printer_title="Observing",
+            printer_group_id=group_id,
+        )
+        observe_output = observe_result.final_output if hasattr(observe_result, 'final_output') else observe_result
+        self.context.apply_output("observe", observe_output)
+        iteration.observation = self._serialize_output(observe_output)
+        self._record_structured_payload(observe_output, context_label="observe")
+
+        # Step 2: Evaluate using behavior rendering
+        evaluate_instructions = self.context.render_behavior("evaluate", self.context.snapshot("evaluate"))
+        evaluate_result = await self.agent_step(
+            agent=self.evaluate_agent,
+            instructions=evaluate_instructions,
+            span_name="evaluate",
+            span_type="agent",
+            output_model=EvaluateOutput,
+            printer_key="evaluate",
+            printer_title="Evaluating",
+            printer_group_id=group_id,
+        )
+        evaluate_output = evaluate_result.final_output if hasattr(evaluate_result, 'final_output') else evaluate_result
+        self.context.apply_output("evaluate", evaluate_output)
+        self._record_structured_payload(evaluate_output, context_label="evaluate")
+
+        # Step 3: Route to appropriate tools if not complete
+        if not self.state.complete:
+            routing_instructions = self.context.render_behavior("route", self.context.snapshot("route"))
+            routing_result = await self.agent_step(
+                agent=self.routing_agent,
+                instructions=routing_instructions,
+                span_name="routing",
+                span_type="agent",
+                output_model=AgentSelectionPlan,
+                printer_key="routing",
+                printer_title="Routing",
+                printer_group_id=group_id,
             )
+            routing_output = routing_result.final_output if hasattr(routing_result, 'final_output') else routing_result
+            self.context.apply_output("route", routing_output)
+            self._record_structured_payload(routing_output, context_label="routing")
+
+            # Step 4: Execute selected tools in parallel
+            await self._execute_tools(routing_output, self.tool_agents, group_id)
+
+        # Step 5: Memory compression (if needed)
+        if not self.state.complete and bool(self.state.unsummarized_history()):
+            memory_instructions = self.context.render_behavior("memory", self.context.snapshot("memory"))
+            memory_result = await self.agent_step(
+                agent=self.memory_agent,
+                instructions=memory_instructions,
+                span_name="memory",
+                span_type="agent",
+                output_model=MemoryAgentOutput,
+                printer_key="memory",
+                printer_title="Memory Compression",
+                printer_group_id=group_id,
+            )
+            memory_output = memory_result.final_output if hasattr(memory_result, 'final_output') else memory_result
+            self.context.apply_output("memory", memory_output)
+            self._record_structured_payload(memory_output, context_label="memory")
+
+    async def _final_step(self, final_group: str):
+        """Generate final report using writer agent."""
+        self.update_printer("research", "Research workflow complete", is_done=True)
+
+        writer_instructions = self.context.render_behavior("writer", self.context.snapshot("writer"))
+        await self.agent_step(
+            agent=self.writer_agent,
+            instructions=writer_instructions,
+            span_name="writer",
+            span_type="agent",
+            printer_key="writer",
+            printer_title="Writing Report",
+            printer_group_id=final_group,
         )
-        return nodes
-
-    def _build_memory_payload(self, context: PipelineContext) -> Dict[str, Any]:
-        state = context.state
-        unsummarized = state.unsummarized_history()
-        if not unsummarized:
-            unsummarized = "No previous unsummarized actions, findings or thoughts available."
-        return {
-            "ITERATION": state.current_iteration.index,
-            "QUERY": state.query,
-            "LAST_SUMMARY": state.summary or "No previous summary available.",
-            "CONVERSATION_HISTORY": unsummarized,
-        }
-
-    def _handle_memory_output(self, context: PipelineContext, result: MemoryAgentOutput) -> None:
-        context.state.update_summary(result.summary)
-
-    def _should_run_memory_node(self, context: PipelineContext) -> bool:
-        state = context.state
-        if state.complete:
-            return False
-        return bool(state.unsummarized_history())

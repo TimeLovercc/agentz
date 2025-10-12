@@ -3,11 +3,11 @@
 from typing import Optional
 from pathlib import Path
 import pandas as pd
-from agentz.memory.pipeline_context import PipelineDataStore
+from agentz.context.data_store import DataStore
 from loguru import logger
 
 
-def get_dataframe(file_path: str, prefer_preprocessed: bool = False, data_store: Optional[PipelineDataStore] = None) -> Optional[pd.DataFrame]:
+def get_dataframe(file_path: str, prefer_preprocessed: bool = False, data_store: Optional[DataStore] = None) -> Optional[pd.DataFrame]:
     """Get a DataFrame from cache or load from file.
 
     Args:
@@ -39,7 +39,7 @@ def get_dataframe(file_path: str, prefer_preprocessed: bool = False, data_store:
     return None
 
 
-def load_or_get_dataframe(file_path: str, prefer_preprocessed: bool = False, data_store: Optional[PipelineDataStore] = None) -> pd.DataFrame:
+def load_or_get_dataframe(file_path: str, prefer_preprocessed: bool = False, data_store: Optional[DataStore] = None) -> pd.DataFrame:
     """Get DataFrame from cache or load from file, with fallback loading.
 
     Args:
@@ -89,7 +89,7 @@ def load_or_get_dataframe(file_path: str, prefer_preprocessed: bool = False, dat
     return df
 
 
-def cache_object(key: str, obj: any, data_type: str = None, metadata: dict = None, data_store: Optional[PipelineDataStore] = None) -> None:
+def cache_object(key: str, obj: any, data_type: str = None, metadata: dict = None, data_store: Optional[DataStore] = None) -> None:
     """Cache an object in the pipeline data store.
 
     Args:
@@ -104,7 +104,7 @@ def cache_object(key: str, obj: any, data_type: str = None, metadata: dict = Non
         logger.info(f"Cached {data_type or 'object'} with key: {key}")
 
 
-def get_cached_object(key: str, data_store: Optional[PipelineDataStore] = None) -> Optional[any]:
+def get_cached_object(key: str, data_store: Optional[DataStore] = None) -> Optional[any]:
     """Get a cached object from the pipeline data store.
 
     Args:
