@@ -9,7 +9,6 @@ from agentz.profiles.manager.memory import MemoryAgentOutput
 from agentz.profiles.manager.evaluate import EvaluateOutput
 from agentz.profiles.manager.routing import AgentSelectionPlan
 from agentz.profiles.base import load_all_profiles
-from agentz.runner import auto_trace
 from pipelines.data_scientist import DataScientistPipeline
 
 
@@ -34,13 +33,11 @@ class DataScientistMemoryPipeline(DataScientistPipeline):
         )
 
         # Manager agents with memory support
-        manager_agents = {
-            "observe_agent": ContextAgent.from_profile(profiles["observe"], llm),
-            "evaluate_agent": ContextAgent.from_profile(profiles["evaluate"], llm),
-            "routing_agent": ContextAgent.from_profile(profiles["routing"], llm),
-            "writer_agent": ContextAgent.from_profile(profiles["writer"], llm),
-            "memory_agent": ContextAgent.from_profile(profiles["memory"], llm),
-        }
+        self.observe_agent = ContextAgent.from_profile(profiles["observe"], llm)
+        self.evaluate_agent = ContextAgent.from_profile(profiles["evaluate"], llm)
+        self.routing_agent = ContextAgent.from_profile(profiles["routing"], llm)
+        self.writer_agent = ContextAgent.from_profile(profiles["writer"], llm)
+        self.memory_agent = ContextAgent.from_profile(profiles["memory"], llm)
 
         # Tool agents for specialized tasks
         self.tool_agents: Dict[str, Any] = {
@@ -49,140 +46,115 @@ class DataScientistMemoryPipeline(DataScientistPipeline):
                         "model_training", "evaluation", "visualization"]
         }
 
-        # Workflow orchestration
-        from agentz.runner import WorkflowOrchestrator, IterationManager
-        self.flow = WorkflowOrchestrator(
-            engine=self.context,
-            agent_registry=manager_agents,
-            pipeline=self,
-        )
-
-        self.iteration_manager = IterationManager(
-            engine=self.context,
-            loop_condition=self._should_continue_loop,
-            pipeline=self,
-        )
-
         # Optional report configuration
         self.report_length: Optional[str] = None
         self.report_instructions: Optional[str] = None
 
 
-    # ------------------------------------------------------------------
-    # Override run to include memory step
-    # ------------------------------------------------------------------
-    @auto_trace
-    async def run(self):
-        """Execute the data science pipeline with memory compression."""
-        from loguru import logger
-        import time
-
-        logger.info(f"Data path: {self.config.data_path}")
-        logger.info(f"User prompt: {self.config.prompt}")
-        self.iteration = 0
-
-        # Prepare the structured query and initialise state timing
-        query = self.prepare_query(
-            content=(
-                f"Task: {self.config.prompt}\n"
-                f"Dataset path: {self.config.data_path}\n"
-                "Provide a comprehensive data science workflow"
-            )
+    def prepare_query_hook(self, query):
+        """Format data science query."""
+        return (
+            f"Task: {query.prompt}\n"
+            f"Dataset path: {query.data_path}\n"
+            "Provide a comprehensive data science workflow"
         )
-        self.state.set_query(query)
 
+    async def execute(self) -> Any:
+        """Execute data science workflow with memory compression.
+
+        This shows the full workflow:
+        1. Iterative loop with observe → evaluate → route → execute tools → memory compression
+        2. Final report generation with writer agent
+        """
         self.update_printer("research", "Executing research workflow...")
 
-        # Execute iterative workflow with memory compression
-        while self.iteration_manager.should_continue():
-            iteration, iteration_group = self.iteration_manager.begin_iteration()
+        return await self.run_iterative_loop(
+            iteration_body=self._iteration_step,
+            final_body=self._final_step
+        )
 
-            # Step 1: Observe
-            await self.flow.run_iteration_step(
-                behavior_name="observe",
-                agent_name="observe_agent",
-                snapshot_builder=lambda ctx: ctx.snapshot("observe"),
-                output_handler=lambda ctx, result: ctx.apply_output("observe", result),
-                span_name="generate_observations",
-                span_type="function",
-                printer_key="observe",
-                printer_title="Observations",
-                printer_group_id=iteration_group,
+    async def _iteration_step(self, iteration, group_id: str):
+        """Execute one iteration: observe → evaluate → route → tools → memory."""
+        # Step 1: Observe using behavior rendering
+        observe_instructions = self.context.render_behavior("observe", self.context.snapshot("observe"))
+        observe_result = await self.agent_step(
+            agent=self.observe_agent,
+            instructions=observe_instructions,
+            span_name="observe",
+            span_type="agent",
+            printer_key="observe",
+            printer_title="Observing",
+            printer_group_id=group_id,
+        )
+        observe_output = observe_result.final_output if hasattr(observe_result, 'final_output') else observe_result
+        self.context.apply_output("observe", observe_output)
+        iteration.observation = self._serialize_output(observe_output)
+        self._record_structured_payload(observe_output, context_label="observe")
+
+        # Step 2: Evaluate using behavior rendering
+        evaluate_instructions = self.context.render_behavior("evaluate", self.context.snapshot("evaluate"))
+        evaluate_result = await self.agent_step(
+            agent=self.evaluate_agent,
+            instructions=evaluate_instructions,
+            span_name="evaluate",
+            span_type="agent",
+            output_model=EvaluateOutput,
+            printer_key="evaluate",
+            printer_title="Evaluating",
+            printer_group_id=group_id,
+        )
+        evaluate_output = evaluate_result.final_output if hasattr(evaluate_result, 'final_output') else evaluate_result
+        self.context.apply_output("evaluate", evaluate_output)
+        self._record_structured_payload(evaluate_output, context_label="evaluate")
+
+        # Step 3: Route to appropriate tools if not complete
+        if not self.state.complete:
+            routing_instructions = self.context.render_behavior("route", self.context.snapshot("route"))
+            routing_result = await self.agent_step(
+                agent=self.routing_agent,
+                instructions=routing_instructions,
+                span_name="routing",
+                span_type="agent",
+                output_model=AgentSelectionPlan,
+                printer_key="routing",
+                printer_title="Routing",
+                printer_group_id=group_id,
             )
+            routing_output = routing_result.final_output if hasattr(routing_result, 'final_output') else routing_result
+            self.context.apply_output("route", routing_output)
+            self._record_structured_payload(routing_output, context_label="routing")
 
-            # Step 2: Evaluate
-            await self.flow.run_iteration_step(
-                behavior_name="evaluate",
-                agent_name="evaluate_agent",
-                snapshot_builder=lambda ctx: ctx.snapshot("evaluate"),
-                output_handler=lambda ctx, result: ctx.apply_output("evaluate", result),
-                output_model=EvaluateOutput,
-                span_name="evaluate_research_state",
-                span_type="function",
-                printer_key="evaluate",
-                printer_title="Evaluation",
-                printer_group_id=iteration_group,
+            # Step 4: Execute selected tools in parallel
+            await self._execute_tools(routing_output, self.tool_agents, group_id)
+
+        # Step 5: Memory compression (if needed)
+        if not self.state.complete and bool(self.state.unsummarized_history()):
+            memory_instructions = self.context.render_behavior("memory", self.context.snapshot("memory"))
+            memory_result = await self.agent_step(
+                agent=self.memory_agent,
+                instructions=memory_instructions,
+                span_name="memory",
+                span_type="agent",
+                output_model=MemoryAgentOutput,
+                printer_key="memory",
+                printer_title="Memory Compression",
+                printer_group_id=group_id,
             )
+            memory_output = memory_result.final_output if hasattr(memory_result, 'final_output') else memory_result
+            self.context.apply_output("memory", memory_output)
+            self._record_structured_payload(memory_output, context_label="memory")
 
-            # Step 3: Route (conditional)
-            if not self.state.complete:
-                await self.flow.run_iteration_step(
-                    behavior_name="route",
-                    agent_name="routing_agent",
-                    snapshot_builder=lambda ctx: ctx.snapshot("route"),
-                    output_handler=lambda ctx, result: ctx.apply_output("route", result),
-                    output_model=AgentSelectionPlan,
-                    span_name="route_tasks",
-                    span_type="tool",
-                    printer_key="route",
-                    printer_title="Routing",
-                    printer_group_id=iteration_group,
-                )
+    async def _final_step(self, final_group: str):
+        """Generate final report using writer agent."""
+        self.update_printer("research", "Research workflow complete", is_done=True)
 
-            # Step 4: Execute tools (conditional)
-            if self._has_pending_tools():
-                await self._execute_tool_tasks(iteration_group)
-
-            # Step 5: Memory compression (conditional)
-            if not self.state.complete and bool(self.state.unsummarized_history()):
-                await self.flow.run_iteration_step(
-                    behavior_name="memory",
-                    agent_name="memory_agent",
-                    snapshot_builder=lambda ctx: ctx.snapshot("memory"),
-                    output_handler=lambda ctx, result: ctx.apply_output("memory", result),
-                    output_model=MemoryAgentOutput,
-                    span_name="update_memory",
-                    span_type="function",
-                    printer_key="memory",
-                    printer_title="Memory",
-                    printer_group_id=iteration_group,
-                )
-
-            self.iteration_manager.end_iteration(iteration_group)
-
-            if self.state.complete:
-                break
-
-        # Final report generation
-        final_group = self.iteration_manager.start_final_group()
-        await self.flow.run_iteration_step(
-            behavior_name="writer",
-            agent_name="writer_agent",
-            snapshot_builder=lambda ctx: ctx.snapshot("writer"),
-            output_handler=lambda ctx, result: ctx.apply_output("writer", result),
-            span_name="writer_agent",
+        writer_instructions = self.context.render_behavior("writer", self.context.snapshot("writer"))
+        await self.agent_step(
+            agent=self.writer_agent,
+            instructions=writer_instructions,
+            span_name="writer",
             span_type="agent",
             printer_key="writer",
-            printer_title="Writer",
+            printer_title="Writing Report",
             printer_group_id=final_group,
         )
-        self.iteration_manager.end_final_group(final_group)
-
-        # Finalise persisted memory and artefacts
-        self.update_printer("research", "Research workflow complete", is_done=True)
-        logger.info("Research workflow completed")
-
-        if self.state.final_report:
-            await self._finalise_research(self.state.final_report)
-
-        return self.state.final_report
