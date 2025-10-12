@@ -50,15 +50,6 @@ class DataScientistMemoryPipeline(DataScientistPipeline):
         self.report_length: Optional[str] = None
         self.report_instructions: Optional[str] = None
 
-
-    def format_query(self, query):
-        """Format data science query."""
-        return (
-            f"Task: {query.prompt}\n"
-            f"Dataset path: {query.data_path}\n"
-            "Provide a comprehensive data science workflow"
-        )
-
     async def execute(self) -> Any:
         """Execute data science workflow with memory compression.
 

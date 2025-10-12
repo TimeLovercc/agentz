@@ -14,14 +14,22 @@ class DataScienceQuery(BaseModel):
     prompt: str
     data_path: str
 
+    def format(self) -> str:
+        """Format data science query."""
+        return (
+            f"Task: {self.prompt}\n"
+            f"Dataset path: {self.data_path}\n"
+            "Provide a comprehensive data science workflow"
+        )
+
 
 class DataScientistPipeline(BasePipeline):
     """Data science pipeline using manager-tool pattern.
 
     This pipeline demonstrates the minimal implementation needed:
     - __init__: Setup agents
-    - execute: Use run_manager_tool_loop pattern
-    - format_query: Format query (optional)
+    - execute: Implement the workflow logic
+    - DataScienceQuery.format(): Format query (handled automatically by BasePipeline)
 
     All other logic (iteration, tool execution, memory save) is handled by BasePipeline.
     """
@@ -70,14 +78,6 @@ class DataScientistPipeline(BasePipeline):
 
         for agent in self.tool_agents.values():
             agent._pipeline = self
-
-    def format_query(self, query: DataScienceQuery) -> str:
-        """Format data science query."""
-        return (
-            f"Task: {query.prompt}\n"
-            f"Dataset path: {query.data_path}\n"
-            "Provide a comprehensive data science workflow"
-        )
 
     async def execute(self) -> Any:
         """Execute data science workflow - full implementation in one function."""

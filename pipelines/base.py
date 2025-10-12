@@ -464,6 +464,11 @@ class BasePipeline:
     def format_query(self, query: Any) -> str:
         """Transform input query to formatted string.
 
+        Default behavior (in order of priority):
+        1. If query has a format() method, call it
+        2. If query is a BaseModel, return model_dump_json()
+        3. Otherwise, return str(query)
+
         Override this to customize query formatting.
 
         Args:
@@ -472,6 +477,8 @@ class BasePipeline:
         Returns:
             Formatted query string
         """
+        if hasattr(query, 'format') and callable(getattr(query, 'format')):
+            return query.format()
         if isinstance(query, BaseModel):
             return query.model_dump_json(indent=2)
         return str(query)
