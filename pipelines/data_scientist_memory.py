@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+from agentz.agent.base import ContextAgent
 from agentz.context.conversation import create_conversation_state
 from agentz.context.context import Context
 from agentz.profiles.manager.memory import MemoryAgentOutput
 from agentz.profiles.manager.evaluate import EvaluateOutput
 from agentz.profiles.manager.routing import AgentSelectionPlan
 from agentz.profiles.base import load_all_profiles
-from agentz.agent.registry import create_agents
 from agentz.runner import auto_trace
 from pipelines.data_scientist import DataScientistPipeline
 
@@ -24,6 +24,7 @@ class DataScientistMemoryPipeline(DataScientistPipeline):
 
         profiles = load_all_profiles()
         state = create_conversation_state(profiles=profiles)
+        llm = self.config.llm.main_model
 
         # Centralized context engine with state and behaviors (including memory)
         self.context = Context(
@@ -34,22 +35,19 @@ class DataScientistMemoryPipeline(DataScientistPipeline):
 
         # Manager agents with memory support
         manager_agents = {
-            "observe_agent": create_agents("observe_agent", config),
-            "evaluate_agent": create_agents("evaluate_agent", config),
-            "routing_agent": create_agents("routing_agent", config),
-            "writer_agent": create_agents("writer_agent", config),
-            "memory_agent": create_agents("memory_agent", config),
+            "observe_agent": ContextAgent.from_profile(profiles["observe"], llm),
+            "evaluate_agent": ContextAgent.from_profile(profiles["evaluate"], llm),
+            "routing_agent": ContextAgent.from_profile(profiles["routing"], llm),
+            "writer_agent": ContextAgent.from_profile(profiles["writer"], llm),
+            "memory_agent": ContextAgent.from_profile(profiles["memory"], llm),
         }
 
         # Tool agents for specialized tasks
-        self.tool_agents: Dict[str, Any] = create_agents([
-            "data_loader_agent",
-            "data_analysis_agent",
-            "preprocessing_agent",
-            "model_training_agent",
-            "evaluation_agent",
-            "visualization_agent",
-        ], config)
+        self.tool_agents: Dict[str, Any] = {
+            f"{name}_agent": ContextAgent.from_profile(profiles[name], llm)
+            for name in ["data_loader", "data_analysis", "preprocessing",
+                        "model_training", "evaluation", "visualization"]
+        }
 
         # Workflow orchestration
         from agentz.runner import WorkflowOrchestrator, IterationManager

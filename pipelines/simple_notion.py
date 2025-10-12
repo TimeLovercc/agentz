@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from loguru import logger
 
-from agentz.agent.registry import create_agents, register_agent
+from agentz.agent.base import ContextAgent as Agent
 from agentz.runner import auto_trace
 from agentz.profiles.base import load_all_profiles
 from pipelines.base import BasePipeline
@@ -10,7 +10,6 @@ from agentz.profiles.base import ToolAgentOutput
 from agentz.configuration.base import BaseConfig
 from agentz.llm.llm_setup import model_supports_json_and_tool_calls
 from agentz.utils import create_type_parser
-from agentz.agent.base import ContextAgent as Agent
 from agents.mcp import MCPServer, MCPServerStdio, MCPServerSse
 
 
@@ -31,9 +30,10 @@ class SimpleNotionPipeline(BasePipeline):
 
         # Load profiles for template rendering
         self.profiles = load_all_profiles()
+        llm = self.config.llm.main_model
 
         # Setup routing agent
-        self.routing_agent = create_agents("routing_agent", config)
+        self.routing_agent = Agent.from_profile(self.profiles["routing"], llm)
 
         # Setup single tool agent
         self.tool_agent = None

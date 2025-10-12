@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from loguru import logger
 
-from agentz.agent.registry import create_agents
+from agentz.agent.base import ContextAgent
 from agentz.runner import auto_trace
 from agentz.profiles.base import load_all_profiles
 from pipelines.base import BasePipeline
@@ -16,12 +16,13 @@ class SimpleChromePipeline(BasePipeline):
 
         # Load profiles for template rendering
         self.profiles = load_all_profiles()
+        llm = self.config.llm.main_model
 
         # Setup routing agent
-        self.routing_agent = create_agents("routing_agent", config)
+        self.routing_agent = ContextAgent.from_profile(self.profiles["routing"], llm)
 
         # Setup single tool agent
-        self.tool_agent = create_agents("chrome_agent", config)
+        self.tool_agent = ContextAgent.from_profile(self.profiles["chrome"], llm)
 
     @auto_trace
     async def run(self):

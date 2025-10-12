@@ -8,7 +8,6 @@ from loguru import logger
 from rich.console import Console
 
 from agents.tracing.create import function_span
-from agentz.agent.registry import AgentStore, set_current_pipeline_store
 from agentz.configuration.base import BaseConfig, resolve_config
 from agentz.runner import (
     AgentExecutor,
@@ -21,6 +20,10 @@ from pydantic import BaseModel
 
 class BasePipeline:
     """Base class for all pipelines with common configuration and setup."""
+
+    # Constants for iteration group IDs
+    ITERATION_GROUP_PREFIX = "iter"
+    FINAL_GROUP_ID = "iter-final"
 
     def __init__(self, config: Union[str, Path, Mapping[str, Any], BaseConfig]):
         """Initialize the pipeline using a single configuration input.
@@ -56,13 +59,6 @@ class BasePipeline:
 
         # Resolve configuration using the new unified API
         self.config = resolve_config(config)
-
-        # Initialize agent store with BaseConfig (not LLM config)
-        # Factories now receive BaseConfig and extract specs from agents_index
-        self.agents = AgentStore(self.config)
-
-        # Set as current pipeline store for auto-registration
-        set_current_pipeline_store(self.agents)
 
         # Generic pipeline settings
         self.experiment_id = get_experiment_timestamp()
@@ -102,14 +98,6 @@ class BasePipeline:
         # Setup tracing configuration and logging
         self._setup_tracing()
 
-        enable_tracing = self.config.pipeline.get("enable_tracing", True)
-        trace_sensitive = self.config.pipeline.get("trace_include_sensitive_data", False)
-        pipeline_name = self.__class__.__name__
-        logger.info(
-            f"Initialized {pipeline_name} with experiment_id: {self.experiment_id}, "
-            f"tracing: {enable_tracing}, sensitive_data: {trace_sensitive}"
-        )
-
         # Initialize execution context and executor (from flow module)
         self._execution_context: Optional[ExecutionContext] = None
         self._executor: Optional[AgentExecutor] = None
@@ -125,8 +113,21 @@ class BasePipeline:
         }
 
     @property
-    def provider_name(self) -> str:
-        return self.config.provider
+    def enable_tracing(self) -> bool:
+        """Get tracing enabled flag from config."""
+        return self.config.pipeline.get("enable_tracing", True)
+
+    @property
+    def trace_sensitive(self) -> bool:
+        """Get trace sensitive data flag from config."""
+        return self.config.pipeline.get("trace_include_sensitive_data", False)
+
+    @property
+    def state(self) -> Optional[Any]:
+        """Get pipeline state if available."""
+        if hasattr(self, 'context') and hasattr(self.context, 'state'):
+            return self.context.state
+        return None
 
     @property
     def printer(self) -> Optional[Printer]:
@@ -136,12 +137,10 @@ class BasePipeline:
     def execution_context(self) -> ExecutionContext:
         """Get or create the execution context."""
         if self._execution_context is None:
-            enable_tracing = self.config.pipeline.get("enable_tracing", True)
-            trace_sensitive = self.config.pipeline.get("trace_include_sensitive_data", False)
             self._execution_context = ExecutionContext(
                 printer=self.printer,
-                enable_tracing=enable_tracing,
-                trace_sensitive=trace_sensitive,
+                enable_tracing=self.enable_tracing,
+                trace_sensitive=self.trace_sensitive,
                 iteration=self.iteration,
                 experiment_id=self.experiment_id,
                 reporter=self.reporter,
@@ -207,10 +206,6 @@ class BasePipeline:
         if additional_logging:
             additional_logging()
 
-        # Provider and model logging
-        provider = self.provider_name
-        logger.info(f"Provider: {provider}, Model: {self.config.llm.model_name}")
-
         outputs_dir = Path(self.config.pipeline.get("outputs_dir", "outputs"))
         if self.reporter is None:
             self.reporter = RunReporter(
@@ -233,10 +228,9 @@ class BasePipeline:
             )
 
         # Create trace context
-        trace_sensitive = self.config.pipeline.get("trace_include_sensitive_data", False)
         trace_metadata = {
             "experiment_id": self.experiment_id,
-            "includes_sensitive_data": "true" if trace_sensitive else "false",
+            "includes_sensitive_data": "true" if self.trace_sensitive else "false",
         }
         return self.trace_context(self.workflow_name, metadata=trace_metadata)
 
@@ -245,23 +239,20 @@ class BasePipeline:
 
         Subclasses can override this method to add pipeline-specific information.
         """
-        enable_tracing = self.config.pipeline.get("enable_tracing", True)
-        trace_sensitive = self.config.pipeline.get("trace_include_sensitive_data", False)
-
-        if enable_tracing:
+        if self.enable_tracing:
             pipeline_name = self.__class__.__name__.replace("Pipeline", "")
             self.console.print(f"🍌 Starting {pipeline_name} Pipeline with Tracing")
-            self.console.print(f"🔧 Provider: {self.provider_name}")
+            self.console.print(f"🔧 Provider: {self.config.provider}")
             self.console.print(f"🤖 Model: {self.config.llm.model_name}")
             self.console.print("🔍 Tracing: Enabled")
             self.console.print(
-                f"🔒 Sensitive Data in Traces: {'Yes' if trace_sensitive else 'No'}"
+                f"🔒 Sensitive Data in Traces: {'Yes' if self.trace_sensitive else 'No'}"
             )
             self.console.print(f"🏷️ Workflow: {self.workflow_name}")
         else:
             pipeline_name = self.__class__.__name__.replace("Pipeline", "")
             self.console.print(f"🍌 Starting {pipeline_name} Pipeline")
-            self.console.print(f"🔧 Provider: {self.provider_name}")
+            self.console.print(f"🔧 Provider: {self.config.provider}")
             self.console.print(f"🤖 Model: {self.config.llm.model_name}")
 
     def trace_context(self, name: str, metadata: Optional[Dict[str, Any]] = None):
@@ -572,8 +563,8 @@ class BasePipeline:
         """
         if query is not None:
             formatted_query = self.prepare_query_hook(query)
-            if hasattr(self, 'context') and hasattr(self.context, 'state'):
-                self.context.state.set_query(formatted_query)
+            if self.state:
+                self.state.set_query(formatted_query)
         self.update_printer("initialization", "Pipeline initialized", is_done=True)
 
     def prepare_query_hook(self, query: Any) -> str:
@@ -628,8 +619,8 @@ class BasePipeline:
         try:
             from agentz.context.global_memory import global_memory
 
-            if hasattr(self, 'context') and hasattr(self.context, 'state'):
-                final_report = self.context.state.final_report
+            if self.state:
+                final_report = self.state.final_report
                 if final_report:
                     timestamped_report = f"Experiment {self.experiment_id}\n\n{final_report.strip()}"
                     global_memory.store(
@@ -658,8 +649,8 @@ class BasePipeline:
         Returns:
             Final result to return from run()
         """
-        if hasattr(self, 'context') and hasattr(self.context, 'state'):
-            return self.context.state.final_report
+        if self.state:
+            return self.state.final_report
         return result
 
     # ============================================
@@ -750,7 +741,7 @@ class BasePipeline:
                 await self._trigger_hooks("after_iteration", iteration=iteration, group_id=group_id)
                 self._end_iteration(group_id)
 
-            if hasattr(self, 'context') and hasattr(self.context, 'state') and self.context.state.complete:
+            if self.state and self.state.complete:
                 break
 
         result = None
@@ -916,7 +907,7 @@ class BasePipeline:
             Tuple of (iteration_record, group_id)
         """
         iteration = self.context.begin_iteration()
-        group_id = f"iter-{iteration.index}"
+        group_id = f"{self.ITERATION_GROUP_PREFIX}-{iteration.index}"
 
         self.iteration = iteration.index
         self.start_group(
@@ -935,9 +926,8 @@ class BasePipeline:
 
     def _start_final_group(self) -> str:
         """Start final group for post-iteration work."""
-        final_group = "iter-final"
-        self.start_group(final_group, title="Final Report", border_style="white")
-        return final_group
+        self.start_group(self.FINAL_GROUP_ID, title="Final Report", border_style="white")
+        return self.FINAL_GROUP_ID
 
     def _end_final_group(self, group_id: str) -> None:
         """End final group."""
@@ -951,7 +941,7 @@ class BasePipeline:
         - Within max iterations
         - Within max time
         """
-        if hasattr(self, 'context') and hasattr(self.context, 'state') and self.context.state.complete:
+        if self.state and self.state.complete:
             return False
         return self._check_constraints()
 
@@ -968,8 +958,8 @@ class BasePipeline:
         """
         if isinstance(value, BaseModel):
             try:
-                if hasattr(self, 'context') and hasattr(self.context, 'state'):
-                    self.context.state.record_payload(value)
+                if self.state:
+                    self.state.record_payload(value)
             except Exception as exc:
                 if context_label:
                     logger.debug(f"Failed to record payload for {context_label}: {exc}")
@@ -1128,8 +1118,7 @@ class BasePipeline:
         """
         async def iteration_step(iteration, group_id: str):
             """Execute manager workflow + tool execution."""
-            query = self.context.state.query
-            previous_output = query
+            previous_output = self.context.state.query
 
             # Execute manager workflow in sequence
             for agent_name in workflow:
@@ -1213,23 +1202,3 @@ class BasePipeline:
             except Exception as e:
                 logger.warning(f"Hook {callback.__name__} for {event} failed: {e}")
 
-    def _resolve_reporter_artifacts(self):
-        """Resolve reporter artefact configuration from pipeline settings."""
-        pipeline_settings = self.config.pipeline or {}
-        reporter_cfg = pipeline_settings.get("reporter")
-        artifacts = None
-
-        if isinstance(reporter_cfg, Mapping):
-            if reporter_cfg.get("artifacts") is not None:
-                artifacts = reporter_cfg.get("artifacts")
-            elif reporter_cfg.get("preset") is not None:
-                artifacts = reporter_cfg.get("preset")
-            elif reporter_cfg.get("mode") is not None:
-                artifacts = reporter_cfg.get("mode")
-        elif isinstance(reporter_cfg, (list, tuple, set, str)):
-            artifacts = reporter_cfg
-
-        if artifacts is None:
-            artifacts = pipeline_settings.get("output_artifacts")
-
-        return artifacts

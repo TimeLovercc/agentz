@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from loguru import logger
 
-from agentz.agent.registry import create_agents
+from agentz.agent.base import ContextAgent as Agent
 from agentz.runner import auto_trace
 from agentz.profiles.base import load_all_profiles
 from pipelines.base import BasePipeline
-from agentz.agent.base import ContextAgent as Agent
 from agentz.mcp.manager import MCPManager, MCPServerSpec
 from agentz.mcp.patches import apply_browsermcp_close_patch
 
@@ -59,9 +58,10 @@ class SimpleBrowserPipeline(BasePipeline):
 
         # Load profiles for template rendering
         self.profiles = load_all_profiles()
+        llm = self.config.llm.main_model
 
         # Setup routing agent
-        self.routing_agent = create_agents("routing_agent", config)
+        self.routing_agent = Agent.from_profile(self.profiles["routing"], llm)
 
         # Setup single tool agent
         self.tool_agent = None
