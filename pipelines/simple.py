@@ -3,7 +3,6 @@ from __future__ import annotations
 from loguru import logger
 
 from agentz.agent.base import ContextAgent
-from agentz.runner import auto_trace
 from agentz.profiles.base import load_all_profiles
 from pipelines.base import BasePipeline
 
@@ -24,7 +23,6 @@ class SimplePipeline(BasePipeline):
         # Setup single tool agent
         self.tool_agent = ContextAgent.from_profile(self.profiles["data_analysis"], llm)
 
-    @auto_trace
     async def run(self):
         """Run the simple pipeline with single-pass execution."""
         logger.info(f"Data path: {self.config.data_path}")

@@ -3,7 +3,6 @@ from __future__ import annotations
 from loguru import logger
 
 from agentz.agent.base import ContextAgent as Agent
-from agentz.runner import auto_trace
 from agentz.profiles.base import load_all_profiles
 from pipelines.base import BasePipeline
 from agentz.mcp.manager import MCPManager, MCPServerSpec
@@ -78,7 +77,6 @@ class SimpleBrowserPipeline(BasePipeline):
             ),
         )
 
-    @auto_trace
     async def run(self):
         """Run the simple pipeline with single-pass execution to validate the browser agent."""
         logger.info(f"User prompt: {self.config.prompt}")

@@ -2,7 +2,7 @@ import asyncio
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, Tuple, Union
+from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, Union
 
 from loguru import logger
 from rich.console import Console
@@ -12,6 +12,14 @@ from agentz.utils.config import BaseConfig, resolve_config
 from agentz.runner import (
     AgentExecutor,
     RuntimeTracker,
+    HookRegistry,
+    IterationManager,
+    WorkflowHelpers,
+    execute_tool_plan,
+    execute_tools,
+    run_manager_tool_loop,
+    record_structured_payload,
+    serialize_output,
 )
 from agentz.artifacts import RunReporter
 from agentz.utils import Printer, get_experiment_timestamp
@@ -102,15 +110,14 @@ class BasePipeline:
         self._runtime_tracker: Optional[RuntimeTracker] = None
         self._executor: Optional[AgentExecutor] = None
 
-        # Hook registry for event-driven extensibility
-        self._hooks: Dict[str, List[Tuple[int, Callable]]] = {
-            "before_execution": [],
-            "after_execution": [],
-            "before_iteration": [],
-            "after_iteration": [],
-            "before_agent_step": [],
-            "after_agent_step": [],
-        }
+        # Initialize hook registry
+        self._hook_registry = HookRegistry()
+
+        # Initialize iteration manager (will be configured with callbacks later)
+        self._iteration_manager: Optional[IterationManager] = None
+
+        # Initialize workflow helpers (will be configured with callbacks later)
+        self._workflow_helpers: Optional[WorkflowHelpers] = None
 
     @property
     def enable_tracing(self) -> bool:
@@ -164,6 +171,32 @@ class BasePipeline:
             # Executor holds a reference to the tracker; update it in case it changed
             self._executor.context = tracker
         return self._executor
+
+    @property
+    def iteration_manager(self) -> IterationManager:
+        """Get or create the iteration manager."""
+        if self._iteration_manager is None:
+            self._iteration_manager = IterationManager(
+                context=self.context,
+                max_iterations=self.max_iterations,
+                max_time_minutes=self.max_time_minutes,
+                start_group_callback=self.start_group,
+                end_group_callback=self.end_group,
+            )
+        return self._iteration_manager
+
+    @property
+    def workflow_helpers(self) -> WorkflowHelpers:
+        """Get or create the workflow helpers."""
+        if self._workflow_helpers is None:
+            self._workflow_helpers = WorkflowHelpers(
+                iteration_manager=self.iteration_manager,
+                hook_registry=self._hook_registry,
+                start_group_callback=self.start_group,
+                end_group_callback=self.end_group,
+                update_printer_callback=self.update_printer,
+            )
+        return self._workflow_helpers
 
     def start_printer(self) -> Printer:
         if self._printer is None:
@@ -403,6 +436,8 @@ class BasePipeline:
         """
         # Start pipeline timer for constraint checking
         self.start_time = time.time()
+        if hasattr(self, '_iteration_manager') and self._iteration_manager:
+            self._iteration_manager.start_timer()
 
         trace_ctx = self._initialize_run(additional_logging)
         try:
@@ -482,22 +517,6 @@ class BasePipeline:
         """Log a message using the configured logger."""
         logger.info(message)
 
-    def _check_constraints(self) -> bool:
-        """Check if we've exceeded our constraints (max iterations or time)."""
-        if self.iteration >= self.max_iterations:
-            self._log_message("\n=== Ending Research Loop ===")
-            self._log_message(f"Reached maximum iterations ({self.max_iterations})")
-            return False
-
-        if self.start_time is not None:
-            elapsed_minutes = (time.time() - self.start_time) / 60
-            if elapsed_minutes >= self.max_time_minutes:
-                self._log_message("\n=== Ending Research Loop ===")
-                self._log_message(f"Reached maximum time ({self.max_time_minutes} minutes)")
-                return False
-
-        return True
-
     def run_sync(self, *args, **kwargs):
         """Synchronous wrapper for the async run method."""
         return asyncio.run(self.run(*args, **kwargs))
@@ -530,13 +549,13 @@ class BasePipeline:
 
             # Phase 2: Pre-execution hooks
             await self.before_execution()
-            await self._trigger_hooks("before_execution")
+            await self._hook_registry.trigger("before_execution", context=self)
 
             # Phase 3: Main execution (delegated to subclass)
             result = await self.execute()
 
             # Phase 4: Post-execution hooks
-            await self._trigger_hooks("after_execution", result=result)
+            await self._hook_registry.trigger("after_execution", context=self, result=result)
             await self.after_execution(result)
 
             # Phase 5: Finalization
@@ -594,7 +613,7 @@ class BasePipeline:
         """
         pass
 
-    async def after_execution(self, result: Any) -> None:
+    async def after_execution(self, result: Any) -> None:  # noqa: ARG002
         """Hook called after execute() completes.
 
         Use for:
@@ -680,6 +699,8 @@ class BasePipeline:
     ) -> Any:
         """Execute standard iterative loop pattern.
 
+        Delegates to WorkflowHelpers.run_iterative_loop.
+
         Args:
             iteration_body: Async function(iteration, group_id) -> result
             final_body: Optional async function(final_group_id) -> result
@@ -687,45 +708,12 @@ class BasePipeline:
 
         Returns:
             Result from final_body if provided, else None
-
-        Example:
-            async def execute(self):
-                async def my_iteration(iteration, group):
-                    observations = await self.observe_agent(...)
-                    evaluations = await self.evaluate_agent(...)
-                    await self.route_and_execute(evaluations, group)
-
-                async def my_final(group):
-                    return await self.writer_agent(...)
-
-                return await self.run_iterative_loop(
-                    iteration_body=my_iteration,
-                    final_body=my_final
-                )
         """
-        should_continue_fn = should_continue or self._should_continue_iteration
-
-        while should_continue_fn():
-            iteration, group_id = self._begin_iteration()
-
-            await self._trigger_hooks("before_iteration", iteration=iteration, group_id=group_id)
-
-            try:
-                await iteration_body(iteration, group_id)
-            finally:
-                await self._trigger_hooks("after_iteration", iteration=iteration, group_id=group_id)
-                self._end_iteration(group_id)
-
-            if self.state and self.state.complete:
-                break
-
-        result = None
-        if final_body:
-            final_group = self._start_final_group()
-            result = await final_body(final_group)
-            self._end_final_group(final_group)
-
-        return result
+        return await self.workflow_helpers.run_iterative_loop(
+            iteration_body=iteration_body,
+            final_body=final_body,
+            should_continue=should_continue,
+        )
 
     async def run_custom_group(
         self,
@@ -736,6 +724,8 @@ class BasePipeline:
     ) -> Any:
         """Execute code within a custom printer group.
 
+        Delegates to WorkflowHelpers.run_custom_group.
+
         Args:
             group_id: Unique group identifier
             title: Display title for the group
@@ -744,29 +734,13 @@ class BasePipeline:
 
         Returns:
             Result from body()
-
-        Example:
-            async def execute(self):
-                exploration = await self.run_custom_group(
-                    "exploration",
-                    "Exploration Phase",
-                    self._explore
-                )
-
-                analysis = await self.run_custom_group(
-                    "analysis",
-                    "Deep Analysis",
-                    lambda: self._analyze(exploration)
-                )
-
-                return analysis
         """
-        self.start_group(group_id, title=title, border_style=border_style)
-        try:
-            result = await body()
-            return result
-        finally:
-            self.end_group(group_id, is_done=True)
+        return await self.workflow_helpers.run_custom_group(
+            group_id=group_id,
+            title=title,
+            body=body,
+            border_style=border_style,
+        )
 
     async def run_parallel_steps(
         self,
@@ -775,34 +749,19 @@ class BasePipeline:
     ) -> Dict[str, Any]:
         """Execute multiple steps in parallel.
 
+        Delegates to WorkflowHelpers.run_parallel_steps.
+
         Args:
             steps: Dict mapping step_name -> async callable
             group_id: Optional group to nest steps in
 
         Returns:
             Dict mapping step_name -> result
-
-        Example:
-            async def execute(self):
-                results = await self.run_parallel_steps({
-                    "data_loading": self.load_data,
-                    "validation": self.validate_inputs,
-                    "model_init": self.initialize_models,
-                })
-
-                data = results["data_loading"]
-                return await self.analyze(data)
         """
-        async def run_step(name: str, fn: Callable):
-            key = f"{group_id}:{name}" if group_id else name
-            self.update_printer(key, f"Running {name}...", group_id=group_id)
-            result = await fn()
-            self.update_printer(key, f"Completed {name}", is_done=True, group_id=group_id)
-            return name, result
-
-        tasks = [run_step(name, fn) for name, fn in steps.items()]
-        completed = await asyncio.gather(*tasks)
-        return dict(completed)
+        return await self.workflow_helpers.run_parallel_steps(
+            steps=steps,
+            group_id=group_id,
+        )
 
     async def run_if(
         self,
@@ -812,6 +771,8 @@ class BasePipeline:
     ) -> Any:
         """Conditional execution helper.
 
+        Delegates to WorkflowHelpers.run_if.
+
         Args:
             condition: Boolean or callable returning bool
             body: Execute if condition is True
@@ -819,23 +780,12 @@ class BasePipeline:
 
         Returns:
             Result from executed body
-
-        Example:
-            async def execute(self):
-                initial = await self.quick_check()
-
-                return await self.run_if(
-                    condition=initial.needs_deep_analysis,
-                    body=lambda: self.deep_analysis(initial),
-                    else_body=lambda: self.simple_report(initial)
-                )
         """
-        cond_result = condition() if callable(condition) else condition
-        if cond_result:
-            return await body()
-        elif else_body:
-            return await else_body()
-        return None
+        return await self.workflow_helpers.run_if(
+            condition=condition,
+            body=body,
+            else_body=else_body,
+        )
 
     async def run_until(
         self,
@@ -845,6 +795,8 @@ class BasePipeline:
     ) -> List[Any]:
         """Execute body repeatedly until condition is met.
 
+        Delegates to WorkflowHelpers.run_until.
+
         Args:
             condition: Callable returning True to stop
             body: Async function(iteration_number) -> result
@@ -852,73 +804,12 @@ class BasePipeline:
 
         Returns:
             List of results from each iteration
-
-        Example:
-            async def execute(self):
-                results = await self.run_until(
-                    condition=lambda: self.context.state.complete,
-                    body=self._exploration_step,
-                    max_iterations=10
-                )
-                return self.aggregate(results)
         """
-        results = []
-        iteration = 0
-
-        while not condition():
-            if max_iterations and iteration >= max_iterations:
-                break
-
-            result = await body(iteration)
-            results.append(result)
-            iteration += 1
-
-        return results
-
-    def _begin_iteration(self) -> Tuple[Any, str]:
-        """Begin a new iteration with printer group.
-
-        Returns:
-            Tuple of (iteration_record, group_id)
-        """
-        iteration = self.context.begin_iteration()
-        group_id = f"{self.ITERATION_GROUP_PREFIX}-{iteration.index}"
-
-        self.iteration = iteration.index
-        self.start_group(
-            group_id,
-            title=f"Iteration {iteration.index}",
-            border_style="white",
-            iteration=iteration.index,
+        return await self.workflow_helpers.run_until(
+            condition=condition,
+            body=body,
+            max_iterations=max_iterations,
         )
-
-        return iteration, group_id
-
-    def _end_iteration(self, group_id: str) -> None:
-        """End the current iteration and close printer group."""
-        self.context.mark_iteration_complete()
-        self.end_group(group_id, is_done=True)
-
-    def _start_final_group(self) -> str:
-        """Start final group for post-iteration work."""
-        self.start_group(self.FINAL_GROUP_ID, title="Final Report", border_style="white")
-        return self.FINAL_GROUP_ID
-
-    def _end_final_group(self, group_id: str) -> None:
-        """End final group."""
-        self.end_group(group_id, is_done=True)
-
-    def _should_continue_iteration(self) -> bool:
-        """Check if iteration should continue.
-
-        Checks:
-        - State not complete
-        - Within max iterations
-        - Within max time
-        """
-        if self.state and self.state.complete:
-            return False
-        return self._check_constraints()
 
     # ============================================
     # Generic Utilities
@@ -927,22 +818,18 @@ class BasePipeline:
     def _record_structured_payload(self, value: object, context_label: Optional[str] = None) -> None:
         """Record a structured payload to the current iteration state.
 
+        Delegates to runner.utils.record_structured_payload.
+
         Args:
             value: The payload to record (typically a BaseModel instance)
             context_label: Optional label for debugging purposes
         """
-        if isinstance(value, BaseModel):
-            try:
-                if self.state:
-                    self.state.record_payload(value)
-            except Exception as exc:
-                if context_label:
-                    logger.debug(f"Failed to record payload for {context_label}: {exc}")
-                else:
-                    logger.debug(f"Failed to record payload: {exc}")
+        record_structured_payload(self.state, value, context_label)
 
     def _serialize_output(self, output: Any) -> str:
         """Serialize agent output to string for storage.
+
+        Delegates to runner.utils.serialize_output.
 
         Args:
             output: The output to serialize (BaseModel, str, or other)
@@ -950,11 +837,7 @@ class BasePipeline:
         Returns:
             String representation of the output
         """
-        if isinstance(output, BaseModel):
-            return output.model_dump_json(indent=2)
-        elif isinstance(output, str):
-            return output
-        return str(output)
+        return serialize_output(output)
 
     async def execute_tool_plan(
         self,
@@ -964,73 +847,21 @@ class BasePipeline:
     ) -> None:
         """Execute a routing plan with tool agents.
 
+        Delegates to runner.patterns.execute_tool_plan.
+
         Args:
             plan: AgentSelectionPlan with tasks to execute
             tool_agents: Dict mapping agent names to agent instances
             group_id: Group ID for printer updates
         """
-        # Import here to avoid circular dependency
-        from agentz.profiles.manager.routing import AgentSelectionPlan, AgentTask
-        from agentz.profiles.base import ToolAgentOutput
-
-        if not isinstance(plan, AgentSelectionPlan) or not plan.tasks:
-            return
-
-        state = self.context.state
-        state.current_iteration.tools.clear()
-
-        async def run_single(task: AgentTask) -> ToolAgentOutput:
-            agent = tool_agents.get(task.agent)
-            if agent is None:
-                output = ToolAgentOutput(
-                    output=f"No implementation found for agent {task.agent}",
-                    sources=[],
-                )
-                self.update_printer(
-                    key=f"{group_id}:tool:{task.agent}",
-                    message=f"Completed {task.agent}",
-                    is_done=True,
-                    group_id=group_id,
-                )
-                return output
-
-            raw_result = await self.agent_step(
-                agent=agent,
-                instructions=task.model_dump_json(),
-                span_name=task.agent,
-                span_type="tool",
-                output_model=ToolAgentOutput,
-                printer_key=f"tool:{task.agent}",
-                printer_title=f"Tool: {task.agent}",
-                printer_group_id=group_id,
-            )
-
-            if isinstance(raw_result, ToolAgentOutput):
-                output = raw_result
-            elif hasattr(raw_result, "final_output_as"):
-                output = raw_result.final_output_as(ToolAgentOutput)
-            elif hasattr(raw_result, "final_output"):
-                output = ToolAgentOutput(output=str(raw_result.final_output), sources=[])
-            else:
-                output = ToolAgentOutput(output=str(raw_result), sources=[])
-
-            try:
-                state.record_payload(output)
-            except Exception as exc:
-                logger.debug(f"Failed to record tool payload for {task.agent}: {exc}")
-
-            self.update_printer(
-                key=f"{group_id}:tool:{task.agent}",
-                message=f"Completed {task.agent}",
-                is_done=True,
-                group_id=group_id,
-            )
-            return output
-
-        coroutines = [run_single(task) for task in plan.tasks]
-        for coro in asyncio.as_completed(coroutines):
-            tool_output = await coro
-            state.current_iteration.tools.append(tool_output)
+        await execute_tool_plan(
+            plan=plan,
+            tool_agents=tool_agents,
+            group_id=group_id,
+            context=self.context,
+            agent_step_fn=self.agent_step,
+            update_printer_fn=self.update_printer,
+        )
 
     async def _execute_tools(
         self,
@@ -1040,26 +871,21 @@ class BasePipeline:
     ) -> None:
         """Execute tool agents based on routing plan.
 
+        Delegates to runner.patterns.execute_tools.
+
         Args:
             route_plan: The routing plan (can be AgentSelectionPlan or other)
             tool_agents: Dict mapping agent names to agent instances
             group_id: Group ID for printer updates
         """
-        from agentz.profiles.manager.routing import AgentSelectionPlan
-
-        # Retrieve route_plan from payloads if needed
-        plan = None
-        if isinstance(route_plan, AgentSelectionPlan):
-            plan = route_plan
-        elif route_plan and hasattr(self, 'context'):
-            # Try to find AgentSelectionPlan in payloads
-            for payload in self.context.state.current_iteration.payloads:
-                if isinstance(payload, AgentSelectionPlan):
-                    plan = payload
-                    break
-
-        if plan and plan.tasks:
-            await self.execute_tool_plan(plan, tool_agents, group_id)
+        await execute_tools(
+            route_plan=route_plan,
+            tool_agents=tool_agents,
+            group_id=group_id,
+            context=self.context,
+            agent_step_fn=self.agent_step,
+            update_printer_fn=self.update_printer,
+        )
 
     # ============================================
     # Pattern Templates (High-Level Workflows)
@@ -1073,6 +899,8 @@ class BasePipeline:
     ) -> Any:
         """Execute standard manager-tool iterative pattern.
 
+        Delegates to runner.patterns.run_manager_tool_loop.
+
         This pattern implements: observe → evaluate → route → execute tools → repeat.
 
         Args:
@@ -1082,53 +910,15 @@ class BasePipeline:
 
         Returns:
             Result from final step
-
-        Example:
-            async def execute(self):
-                return await self.run_manager_tool_loop(
-                    manager_agents=self.manager_agents,
-                    tool_agents=self.tool_agents,
-                    workflow=["observe", "evaluate", "routing"]
-                )
         """
-        async def iteration_step(iteration, group_id: str):
-            """Execute manager workflow + tool execution."""
-            previous_output = self.context.state.query
-
-            # Execute manager workflow in sequence
-            for agent_name in workflow:
-                agent = manager_agents.get(agent_name)
-                if agent is None:
-                    logger.warning(f"Manager agent '{agent_name}' not found, skipping")
-                    continue
-
-                output = await agent(previous_output)
-
-                # Record observation for first step
-                if agent_name == workflow[0]:
-                    iteration.observation = self._serialize_output(output)
-
-                self._record_structured_payload(output, context_label=agent_name)
-                previous_output = output
-
-            # Execute tools if not complete
-            if not self.context.state.complete and previous_output:
-                await self._execute_tools(previous_output, tool_agents, group_id)
-
-        async def final_step(final_group: str):
-            """Generate final report."""
-            self.update_printer("research", "Research workflow complete", is_done=True)
-            logger.info("Research workflow completed")
-
-            writer = manager_agents.get("writer")
-            if writer:
-                await writer(self.context.state.findings_text())
-
-        self.update_printer("research", "Executing research workflow...")
-
-        return await self.run_iterative_loop(
-            iteration_body=iteration_step,
-            final_body=final_step
+        return await run_manager_tool_loop(
+            manager_agents=manager_agents,
+            tool_agents=tool_agents,
+            workflow=workflow,
+            context=self.context,
+            agent_step_fn=self.agent_step,
+            run_iterative_loop_fn=self.run_iterative_loop,
+            update_printer_fn=self.update_printer,
         )
 
     # ============================================
@@ -1143,6 +933,8 @@ class BasePipeline:
     ) -> None:
         """Register a hook callback for an event.
 
+        Delegates to HookRegistry.register.
+
         Args:
             event: Event name (before_execution, after_execution, before_iteration, after_iteration, etc.)
             callback: Callable or async callable
@@ -1154,26 +946,4 @@ class BasePipeline:
 
             pipeline.register_hook("before_iteration", log_iteration)
         """
-        if event not in self._hooks:
-            raise ValueError(f"Unknown hook event: {event}. Valid events: {list(self._hooks.keys())}")
-
-        self._hooks[event].append((priority, callback))
-        # Sort by priority (descending)
-        self._hooks[event].sort(key=lambda x: -x[0])
-
-    async def _trigger_hooks(self, event: str, **kwargs) -> None:
-        """Trigger all registered hooks for an event.
-
-        Args:
-            event: Event name
-            **kwargs: Arguments to pass to hook callbacks
-        """
-        for priority, callback in self._hooks[event]:
-            try:
-                if asyncio.iscoroutinefunction(callback):
-                    await callback(self, **kwargs)
-                else:
-                    callback(self, **kwargs)
-            except Exception as e:
-                logger.warning(f"Hook {callback.__name__} for {event} failed: {e}")
-
+        self._hook_registry.register(event, callback, priority)

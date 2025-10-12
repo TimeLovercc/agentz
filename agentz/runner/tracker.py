@@ -4,7 +4,7 @@ from contextlib import nullcontext, contextmanager
 from contextvars import ContextVar
 from typing import Any, Dict, Optional
 
-from agents.tracing.create import agent_span, function_span, trace
+from agents.tracing.create import trace
 from agentz.utils import Printer
 from agentz.context.data_store import DataStore
 from agentz.artifacts import RunReporter
