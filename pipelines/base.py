@@ -13,7 +13,7 @@ from agentz.runner import (
     AgentExecutor,
     RuntimeTracker,
 )
-from agentz.reporting import RunReporter
+from agentz.artifacts import RunReporter
 from agentz.utils import Printer, get_experiment_timestamp
 from pydantic import BaseModel
 
