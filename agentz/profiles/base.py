@@ -101,7 +101,8 @@ def load_all_profiles():
                     obj._key = key
                     profiles[key] = obj
         except Exception:
-            pass
+            print(f"Error loading profile: {module_name}")
+            raise e
 
     return profiles
 
