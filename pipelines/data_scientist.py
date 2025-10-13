@@ -49,17 +49,17 @@ class DataScientistPipeline(BasePipeline):
         self.writer_agent = ContextAgent.from_profile(self, "writer", llm)
 
         # Create tool agents as dictionary - automatically bound to pipeline
-        tool_names = [
-            "data_loader",
-            "data_analysis",
-            "preprocessing",
-            "model_training",
-            "evaluation",
-            "visualization",
+        tool_agents = [
+            "data_loader_agent",
+            "data_analysis_agent",
+            "preprocessing_agent",
+            "model_training_agent",
+            "evaluation_agent",
+            "visualization_agent",
         ]
         self.tool_agents = {
-            f"{name}_agent": ContextAgent.from_profile(self, name, llm)
-            for name in tool_names
+            f"{name}": ContextAgent.from_profile(self, name, llm)
+            for name in tool_agents
         }
 
     async def execute(self) -> Any:
