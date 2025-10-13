@@ -3,6 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from agentz.profiles.base import Profile, ToolAgentOutput
+from agentz.tools.data_tools.visualization import create_visualization
 
 
 class TaskInput(BaseModel):
@@ -42,6 +43,6 @@ Output JSON only following this schema:
     runtime_template="[[TASK]]",
     output_schema=ToolAgentOutput,
     input_schema=TaskInput,
-    tools=["create_visualization"],
+    tools=[create_visualization],
     model=None
 )

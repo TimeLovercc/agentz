@@ -87,31 +87,22 @@ def parse_json_output(output: str) -> Any:
     # First try to load the string as JSON
     try:
         return json.loads(output)
-    except json.JSONDecodeError as e:
-        escaped_output = _escape_unescaped_quotes(output)
-        if escaped_output != output:
-            try:
-                return json.loads(escaped_output)
-            except json.JSONDecodeError:
-                pass
+    except json.JSONDecodeError:
         pass
 
-    # If that fails, assume that the output is in a code block - remove the code block markers and try again
-    parsed_output = output
-    parsed_output = parsed_output.split("```")[1]
-    parsed_output = parsed_output.split("```")[0]
-    if parsed_output.startswith("json") or parsed_output.startswith("JSON"):
-        parsed_output = parsed_output[4:].strip()
-    try:
-        return json.loads(parsed_output)
-    except json.JSONDecodeError:
-        escaped_output = _escape_unescaped_quotes(parsed_output)
-        if escaped_output != parsed_output:
+    # If that fails, try to extract from code block if it exists
+    if "```" in output:
+        parts = output.split("```")
+        if len(parts) >= 2:
+            parsed_output = parts[1]
+            if "```" in parsed_output:
+                parsed_output = parsed_output.split("```")[0]
+            if parsed_output.startswith("json") or parsed_output.startswith("JSON"):
+                parsed_output = parsed_output[4:].strip()
             try:
-                return json.loads(escaped_output)
+                return json.loads(parsed_output)
             except json.JSONDecodeError:
                 pass
-        pass
 
     # As a last attempt, try to manually find the JSON object in the output and parse it
     parsed_output = find_json_in_string(output)
@@ -119,16 +110,10 @@ def parse_json_output(output: str) -> Any:
         try:
             return json.loads(parsed_output)
         except json.JSONDecodeError:
-            escaped_output = _escape_unescaped_quotes(parsed_output)
-            if escaped_output != parsed_output:
-                try:
-                    return json.loads(escaped_output)
-                except json.JSONDecodeError:
-                    pass
-            raise OutputParserError(f"Failed to parse output as JSON", output)
+            pass
 
     # If all fails, raise an error
-    raise OutputParserError(f"Failed to parse output as JSON", output)
+    raise OutputParserError("Failed to parse output as JSON", output)
 
 
 def create_type_parser(type: BaseModel) -> Callable[[str], BaseModel]:

@@ -21,7 +21,7 @@ class SimplePipeline(BasePipeline):
         self.routing_agent = ContextAgent.from_profile(self.profiles["routing"], llm)
 
         # Setup single tool agent
-        self.tool_agent = ContextAgent.from_profile(self.profiles["data_analysis"], llm)
+        self.tool_agent = ContextAgent.from_profile(self.profiles["data_loader"], llm)
 
     async def run(self):
         """Run the simple pipeline with single-pass execution."""

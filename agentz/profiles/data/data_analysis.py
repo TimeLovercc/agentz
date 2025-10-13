@@ -3,6 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from agentz.profiles.base import Profile, ToolAgentOutput
+from agentz.tools.data_tools.data_analysis import analyze_data
 
 
 class TaskInput(BaseModel):
@@ -33,6 +34,6 @@ Output JSON only following this schema:
     runtime_template="[[TASK]]",
     output_schema=ToolAgentOutput,
     input_schema=TaskInput,
-    tools=["analyze_data"],
+    tools=[analyze_data],
     model=None
 )
