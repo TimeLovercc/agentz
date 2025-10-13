@@ -5,12 +5,12 @@ from pathlib import Path
 import pandas as pd
 from agents import function_tool
 from agents.run_context import RunContextWrapper
-from agentz.context.pipeline_context import PipelineDataStore
+from agentz.context.data_store import DataStore
 from loguru import logger
 
 
 @function_tool
-async def load_dataset(ctx: RunContextWrapper[PipelineDataStore], file_path: str) -> Union[Dict[str, Any], str]:
+async def load_dataset(ctx: RunContextWrapper[DataStore], file_path: str) -> Union[Dict[str, Any], str]:
     """Loads a dataset and provides comprehensive inspection information.
 
     This tool caches the loaded DataFrame in the pipeline data store so other

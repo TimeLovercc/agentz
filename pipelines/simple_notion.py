@@ -2,15 +2,13 @@ from __future__ import annotations
 
 from loguru import logger
 
-from agentz.agent.registry import create_agents
-from agentz.flow import auto_trace
-from agentz.context.behavior_profiles import runtime_prompts
+from agentz.agent.base import ContextAgent as Agent
+from agentz.profiles.base import load_all_profiles
 from pipelines.base import BasePipeline
-from agentz.agent.registry import register_agent, ToolAgentOutput
-from agentz.configuration.base import BaseConfig
+from agentz.profiles.base import ToolAgentOutput
+from agentz.utils.config import BaseConfig
 from agentz.llm.llm_setup import model_supports_json_and_tool_calls
 from agentz.utils import create_type_parser
-from agentz.agent.agent_base import ResearchAgent as Agent
 from agents.mcp import MCPServer, MCPServerStdio, MCPServerSse
 
 
@@ -29,13 +27,16 @@ class SimpleNotionPipeline(BasePipeline):
     def __init__(self, config):
         super().__init__(config)
 
+        # Load profiles for template rendering
+        self.profiles = load_all_profiles()
+        llm = self.config.llm.main_model
+
         # Setup routing agent
-        self.routing_agent = create_agents("routing_agent", config)
+        self.routing_agent = Agent.from_profile(self.profiles["routing"], llm)
 
         # Setup single tool agent
         self.tool_agent = None
 
-    @auto_trace
     async def run(self):
         """Run the simple pipeline with single-pass execution to validate the notion agent."""
         logger.info(f"User prompt: {self.config.prompt}")
@@ -61,14 +62,14 @@ class SimpleNotionPipeline(BasePipeline):
 
         # Route the task
         # self.update_printer("route", "Routing task to agent...")
+        routing_instructions = self.profiles["routing"].render(
+            QUERY=query,
+            GAP="Route the query to the notion_agent",
+            HISTORY=""
+        )
         selection_plan = await self.agent_step(
             agent=self.routing_agent,
-            instructions=runtime_prompts.render(
-                "routing_agent",
-                "single_agent_routing",
-                QUERY=query,
-                AVAILABLE_AGENT="notion_agent",
-            ),
+            instructions=routing_instructions,
             span_name="route_task",
             span_type="agent",
             output_model=self.routing_agent.output_type,

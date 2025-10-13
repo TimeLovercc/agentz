@@ -1,5 +1,6 @@
 """Context engine for managing conversation state and agent I/O."""
 
-from .engine import ContextEngine
+from .conversation import create_conversation_state
+from .context import Context
 
-__all__ = ["ContextEngine"]
+__all__ = ["Context", "create_conversation_state"]

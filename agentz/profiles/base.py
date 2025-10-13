@@ -4,6 +4,12 @@ from typing import Optional, List, Type, Set
 from pydantic import BaseModel, Field, model_validator
 
 
+class ToolAgentOutput(BaseModel):
+    """Standard output for all tool agents"""
+    output: str
+    sources: list[str] = Field(default_factory=list)
+
+
 class Profile(BaseModel):
     instructions: str = Field(description="The agent's system prompt/instructions that define its behavior")
     runtime_template: str = Field(description="The runtime template for the agent's behavior")
@@ -39,9 +45,34 @@ class Profile(BaseModel):
 
         return self
 
+    def render(self, **kwargs) -> str:
+        """Render the runtime template with provided keyword arguments.
+
+        Args:
+            **kwargs: Values to substitute for placeholders in the template.
+                     Keys are matched case-insensitively with [[PLACEHOLDER]] patterns.
+
+        Returns:
+            Rendered template string with all placeholders replaced.
+
+        Examples:
+            profile.render(QUERY="What is AI?", HISTORY="Previous context...")
+        """
+        result = self.runtime_template
+        # Replace [[KEY]] placeholders with provided values
+        for key, value in kwargs.items():
+            placeholder = f"[[{key.upper()}]]"
+            result = result.replace(placeholder, str(value))
+        return result
+
 
 def load_all_profiles():
-    """Load all Profile instances from the profiles package."""
+    """Load all Profile instances from the profiles package.
+
+    Returns:
+        Dict with shortened keys (e.g., "observe" instead of "observe_profile")
+        Each profile has a _key attribute added for automatic name derivation
+    """
     import importlib
     import inspect
     from pathlib import Path
@@ -64,7 +95,11 @@ def load_all_profiles():
             module = importlib.import_module(module_name)
             for name, obj in inspect.getmembers(module):
                 if isinstance(obj, Profile) and not name.startswith('_'):
-                    profiles[name] = obj
+                    # Strip "_profile" suffix from key for cleaner access
+                    key = name.replace('_profile', '') if name.endswith('_profile') else name
+                    # Add _key attribute to profile for automatic name derivation
+                    obj._key = key
+                    profiles[key] = obj
         except Exception:
             pass
 

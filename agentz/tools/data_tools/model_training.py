@@ -11,14 +11,14 @@ from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.metrics import accuracy_score, mean_squared_error, r2_score
 from agents import function_tool
 from agents.run_context import RunContextWrapper
-from agentz.context.pipeline_context import PipelineDataStore
+from agentz.context.data_store import DataStore
 from .helpers import load_or_get_dataframe, cache_object
 from loguru import logger
 
 
 @function_tool
 async def train_model(
-    ctx: RunContextWrapper[PipelineDataStore],
+    ctx: RunContextWrapper[DataStore],
     target_column: str,
     file_path: Optional[str] = None,
     model_type: str = "auto",

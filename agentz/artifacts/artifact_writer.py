@@ -1,20 +1,15 @@
-"""RunReporter persistently captures terminal panels and final reports."""
+"""ArtifactWriter persists run data to markdown and HTML files."""
 
 from __future__ import annotations
 
 import json
-import re
-import threading
 import time
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from rich.console import Console
-from rich.markdown import Markdown
-from rich.panel import Panel
-from rich.text import Text
+if TYPE_CHECKING:
+    from agentz.artifacts.reporter import AgentStepRecord, PanelRecord
 
 
 def _utc_timestamp() -> str:
@@ -31,35 +26,8 @@ def _json_default(obj: Any) -> Any:
     return str(obj)
 
 
-@dataclass
-class PanelRecord:
-    """Representation of a panel rendered during the run."""
-
-    title: Optional[str]
-    content: str
-    border_style: Optional[str]
-    iteration: Optional[int]
-    group_id: Optional[str]
-    recorded_at: str
-
-
-@dataclass
-class AgentStepRecord:
-    """Runtime information captured per agent execution."""
-
-    agent_name: str
-    span_name: str
-    iteration: Optional[int]
-    group_id: Optional[str]
-    started_at: str
-    finished_at: Optional[str] = None
-    duration_seconds: Optional[float] = None
-    status: str = "running"
-    error: Optional[str] = None
-
-
-class RunReporter:
-    """Collects panels and final result for terminal + HTML/Markdown artefacts."""
+class ArtifactWriter:
+    """Collects run data and persists it as markdown and HTML artifacts."""
 
     def __init__(
         self,
@@ -68,13 +36,11 @@ class RunReporter:
         pipeline_slug: str,
         workflow_name: str,
         experiment_id: str,
-        console: Optional[Console] = None,
     ) -> None:
         self.base_dir = base_dir
         self.pipeline_slug = pipeline_slug
         self.workflow_name = workflow_name
         self.experiment_id = experiment_id
-        self.console = console
 
         self.run_dir = base_dir / pipeline_slug / experiment_id
         self.terminal_md_path = self.run_dir / "terminal_log.md"
@@ -91,23 +57,20 @@ class RunReporter:
         self._start_time: Optional[float] = None
         self._started_at_iso: Optional[str] = None
         self._finished_at_iso: Optional[str] = None
-        self._lock = threading.RLock()
 
     # ------------------------------------------------------------------ basics
 
     def start(self, config: Any) -> None:  # noqa: ARG002 - config reserved for future use
         """Prepare filesystem layout and capture start metadata."""
-        with self._lock:
-            if self._start_time is not None:
-                return
-            self.run_dir.mkdir(parents=True, exist_ok=True)
-            self._start_time = time.time()
-            self._started_at_iso = _utc_timestamp()
+        if self._start_time is not None:
+            return
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self._start_time = time.time()
+        self._started_at_iso = _utc_timestamp()
 
     def set_final_result(self, result: Any) -> None:
         """Store pipeline result for later persistence."""
-        with self._lock:
-            self._final_result = result
+        self._final_result = result
 
     # ----------------------------------------------------------------- logging
 
@@ -142,21 +105,20 @@ class RunReporter:
             "iteration": iteration,
             "started_at": timestamp,
         }
-        with self._lock:
-            self._groups[group_id] = payload
-            if iteration is not None:
-                iter_key = f"iter-{iteration}"
-                self._iterations.setdefault(
-                    iter_key,
-                    {
-                        "iteration": iteration,
-                        "title": title or f"Iteration {iteration}",
-                        "started_at": timestamp,
-                        "finished_at": None,
-                        "panels": [],
-                        "agent_steps": [],
-                    },
-                )
+        self._groups[group_id] = payload
+        if iteration is not None:
+            iter_key = f"iter-{iteration}"
+            self._iterations.setdefault(
+                iter_key,
+                {
+                    "iteration": iteration,
+                    "title": title or f"Iteration {iteration}",
+                    "started_at": timestamp,
+                    "finished_at": None,
+                    "panels": [],
+                    "agent_steps": [],
+                },
+            )
 
     def record_group_end(
         self,
@@ -167,30 +129,29 @@ class RunReporter:
     ) -> None:
         """Record the end of an iteration/group."""
         timestamp = _utc_timestamp()
-        with self._lock:
-            group_meta = self._groups.get(group_id)
-            if not group_meta:
-                return
-            group_meta.update(
+        group_meta = self._groups.get(group_id)
+        if not group_meta:
+            return
+        group_meta.update(
+            {
+                "title": title or group_meta.get("title"),
+                "is_done": is_done,
+                "finished_at": timestamp,
+            }
+        )
+        iteration = group_meta.get("iteration")
+        if iteration is not None:
+            iter_key = f"iter-{iteration}"
+            iteration_meta = self._iterations.setdefault(
+                iter_key,
                 {
-                    "title": title or group_meta.get("title"),
-                    "is_done": is_done,
-                    "finished_at": timestamp,
-                }
+                    "iteration": iteration,
+                    "title": title or f"Iteration {iteration}",
+                    "panels": [],
+                    "agent_steps": [],
+                },
             )
-            iteration = group_meta.get("iteration")
-            if iteration is not None:
-                iter_key = f"iter-{iteration}"
-                iteration_meta = self._iterations.setdefault(
-                    iter_key,
-                    {
-                        "iteration": iteration,
-                        "title": title or f"Iteration {iteration}",
-                        "panels": [],
-                        "agent_steps": [],
-                    },
-                )
-                iteration_meta["finished_at"] = timestamp
+            iteration_meta["finished_at"] = timestamp
 
     def record_agent_step_start(
         self,
@@ -203,6 +164,8 @@ class RunReporter:
         printer_title: Optional[str],
     ) -> None:
         """Capture metadata when an agent step begins."""
+        from agentz.artifacts.reporter import AgentStepRecord
+        
         record = AgentStepRecord(
             agent_name=agent_name,
             span_name=span_name,
@@ -210,20 +173,19 @@ class RunReporter:
             group_id=group_id,
             started_at=_utc_timestamp(),
         )
-        with self._lock:
-            self._agent_steps[step_id] = record
-            if iteration is not None:
-                iter_key = f"iter-{iteration}"
-                iteration_meta = self._iterations.setdefault(
-                    iter_key,
-                    {
-                        "iteration": iteration,
-                        "title": printer_title or f"Iteration {iteration}",
-                        "panels": [],
-                        "agent_steps": [],
-                    },
-                )
-                iteration_meta["agent_steps"].append(record)
+        self._agent_steps[step_id] = record
+        if iteration is not None:
+            iter_key = f"iter-{iteration}"
+            iteration_meta = self._iterations.setdefault(
+                iter_key,
+                {
+                    "iteration": iteration,
+                    "title": printer_title or f"Iteration {iteration}",
+                    "panels": [],
+                    "agent_steps": [],
+                },
+            )
+            iteration_meta["agent_steps"].append(record)
 
     def record_agent_step_end(
         self,
@@ -235,13 +197,12 @@ class RunReporter:
     ) -> None:
         """Update agent step telemetry on completion."""
         timestamp = _utc_timestamp()
-        with self._lock:
-            record = self._agent_steps.get(step_id)
-            if record:
-                record.finished_at = timestamp
-                record.duration_seconds = round(duration_seconds, 3)
-                record.status = status
-                record.error = error
+        record = self._agent_steps.get(step_id)
+        if record:
+            record.finished_at = timestamp
+            record.duration_seconds = round(duration_seconds, 3)
+            record.status = status
+            record.error = error
 
     def record_panel(
         self,
@@ -253,6 +214,8 @@ class RunReporter:
         group_id: Optional[str],
     ) -> None:
         """Persist panel meta for terminal & HTML artefacts."""
+        from agentz.artifacts.reporter import PanelRecord
+        
         record = PanelRecord(
             title=title,
             content=content,
@@ -261,41 +224,39 @@ class RunReporter:
             group_id=group_id,
             recorded_at=_utc_timestamp(),
         )
-        with self._lock:
-            self._panels.append(record)
-            if iteration is not None:
-                iter_key = f"iter-{iteration}"
-                iteration_meta = self._iterations.setdefault(
-                    iter_key,
-                    {
-                        "iteration": iteration,
-                        "title": f"Iteration {iteration}",
-                        "panels": [],
-                        "agent_steps": [],
-                    },
-                )
-                iteration_meta["panels"].append(record)
+        self._panels.append(record)
+        if iteration is not None:
+            iter_key = f"iter-{iteration}"
+            iteration_meta = self._iterations.setdefault(
+                iter_key,
+                {
+                    "iteration": iteration,
+                    "title": f"Iteration {iteration}",
+                    "panels": [],
+                    "agent_steps": [],
+                },
+            )
+            iteration_meta["panels"].append(record)
 
     # ------------------------------------------------------------- finalisation
 
     def finalize(self) -> None:
         """Persist markdown + HTML artefacts."""
-        with self._lock:
-            if self._start_time is None or self._finished_at_iso is not None:
-                return
-            self._finished_at_iso = _utc_timestamp()
-            duration = round(time.time() - self._start_time, 3)
+        if self._start_time is None or self._finished_at_iso is not None:
+            return
+        self._finished_at_iso = _utc_timestamp()
+        duration = round(time.time() - self._start_time, 3)
 
-            terminal_sections = self._build_terminal_sections()
-            terminal_md = self._render_terminal_markdown(duration, terminal_sections)
-            terminal_html = self._render_terminal_html(duration, terminal_sections)
+        terminal_sections = self._build_terminal_sections()
+        terminal_md = self._render_terminal_markdown(duration, terminal_sections)
+        terminal_html = self._render_terminal_html(duration, terminal_sections)
 
-            self.terminal_md_path.write_text(terminal_md, encoding="utf-8")
-            self.terminal_html_path.write_text(terminal_html, encoding="utf-8")
+        self.terminal_md_path.write_text(terminal_md, encoding="utf-8")
+        self.terminal_html_path.write_text(terminal_html, encoding="utf-8")
 
-            final_md, final_html = self._render_final_report()
-            self.final_report_md_path.write_text(final_md, encoding="utf-8")
-            self.final_report_html_path.write_text(final_html, encoding="utf-8")
+        final_md, final_html = self._render_final_report()
+        self.final_report_md_path.write_text(final_md, encoding="utf-8")
+        self.final_report_html_path.write_text(final_html, encoding="utf-8")
 
     def _build_terminal_sections(self) -> List[Dict[str, Any]]:
         """Collect ordered sections for terminal artefacts."""
@@ -569,75 +530,9 @@ class RunReporter:
 """
         return markdown_content, html_content
 
-    # ---------------------------------------------------------- terminal flush
-
-    def print_terminal_report(self) -> None:
-        """Stream captured panel content back to the console."""
-        if not self.console or not self._panels:
-            return
-
-        panels = self._select_terminal_panels()
-        if not panels:
-            return
-
-        self.console.print(
-            Text(f"Run artefacts saved to {self.run_dir}", style="bold cyan")
-        )
-        for record in panels:
-            renderable = self._panel_renderable(record.content)
-            panel = Panel(
-                renderable,
-                title=record.title,
-                border_style=record.border_style or "cyan",
-                padding=(1, 2),
-            )
-            self.console.print(panel)
-
-    # ----------------------------------------------------------------- helpers
+    # ------------------------------------------------------------------ helpers
 
     def ensure_started(self) -> None:
         """Raise if reporter not initialised."""
         if self._start_time is None:
-            raise RuntimeError("RunReporter.start must be called before logging events.")
-
-    def _select_terminal_panels(self) -> List[PanelRecord]:
-        """Return only final panels for terminal replay."""
-        final_panels = [
-            record for record in self._panels if self._is_final_panel(record)
-        ]
-        if final_panels:
-            return final_panels
-        # Fallback: display only the most recent panel
-        return self._panels[-1:]
-
-    @staticmethod
-    def _is_final_panel(record: PanelRecord) -> bool:
-        """Heuristic for identifying final report panels."""
-        if record.group_id and "final" in record.group_id.lower():
-            return True
-        if record.title:
-            title = record.title.lower()
-            if "final" in title or "writer" in title:
-                return True
-        return False
-
-    def _panel_renderable(self, content: str):
-        """Render Markdown panels using rich, otherwise plain text."""
-        if self._looks_like_markdown(content):
-            return Markdown(content)
-        return Text(content)
-
-    @staticmethod
-    def _looks_like_markdown(content: str) -> bool:
-        """Rudimentary detection of Markdown content."""
-        if not content:
-            return False
-        markdown_patterns = (
-            r"^#{1,6}\s",           # headings
-            r"^\s*[-*+]\s+\S",      # bullet lists
-            r"^\s*\d+\.\s+\S",      # numbered lists
-            r"`{1,3}.+?`{1,3}",     # inline or fenced code
-            r"\*\*.+\*\*",          # bold text
-            r"_{1,2}.+_{1,2}",      # italic/underline emphasis
-        )
-        return any(re.search(pattern, content, re.MULTILINE) for pattern in markdown_patterns)
+            raise RuntimeError("ArtifactWriter.start must be called before logging events.")
