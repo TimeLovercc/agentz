@@ -259,6 +259,25 @@ class ContextAgent(Agent[TContext]):
                 context_dict['TASK'] = ''
                 context_dict['GAP'] = ''
 
+            # Extract input_schema fields from payload if available
+            # This allows runtime_template placeholders like [[USER_PROMPT]], [[DATA_PATH]] to be filled
+            if self.input_model and payload is not None:
+                try:
+                    # Try to coerce payload to input_model
+                    validated_payload = self._coerce_input(payload, strict=False)
+
+                    # If coercion succeeded and result is a BaseModel, extract fields
+                    if isinstance(validated_payload, BaseModel):
+                        payload_dict = validated_payload.model_dump()
+                        # Add all fields from input_model to context_dict with uppercased keys
+                        for field_name, field_value in payload_dict.items():
+                            uppercased_key = field_name.upper()
+                            # Convert value to string for template rendering
+                            context_dict[uppercased_key] = str(field_value) if field_value is not None else ''
+                except Exception:
+                    # If coercion fails, silently skip - context_dict already has standard keys
+                    pass
+
             # Render the runtime_template with context values
             return profile.render(**context_dict)
 

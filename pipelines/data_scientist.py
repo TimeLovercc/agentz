@@ -62,6 +62,17 @@ class DataScientistPipeline(BasePipeline):
             for name in tool_agents
         }
 
+        # Store original query for writer agent
+        self._original_query = None
+
+    async def initialize_pipeline(self, query: Any) -> None:
+        """Store original query and initialize pipeline state."""
+        # Store the original query object for later use (e.g., in writer agent)
+        self._original_query = query
+
+        # Call parent implementation
+        await super().initialize_pipeline(query)
+
     async def execute(self) -> Any:
         """Execute data science workflow - full implementation in one function."""
         self.update_printer("research", "Executing research workflow...")
@@ -91,7 +102,28 @@ class DataScientistPipeline(BasePipeline):
         final_group = self.begin_final_report()
         self.update_printer("research", "Research workflow complete", is_done=True)
 
+        # Prepare WriterInput with all required fields
+        from agentz.profiles.manager.writer import WriterInput
+
+        # Extract user_prompt and data_path from original query or config
+        if isinstance(self._original_query, DataScienceQuery):
+            user_prompt = self._original_query.prompt
+            data_path = self._original_query.data_path
+        else:
+            # Fall back to config values if query is not DataScienceQuery
+            user_prompt = self.config.data.get('prompt', 'No prompt provided')
+            data_path = self.config.data.get('path', 'No data path provided')
+
         findings = self.context.state.findings_text()
-        await self.writer_agent(findings, group_id=final_group)
+        guidelines_block = ""  # Optional, can be populated from config if needed
+
+        writer_input = WriterInput(
+            user_prompt=user_prompt,
+            data_path=data_path,
+            findings=findings,
+            guidelines_block=guidelines_block
+        )
+
+        await self.writer_agent(writer_input, group_id=final_group)
 
         self.end_final_report(final_group)
