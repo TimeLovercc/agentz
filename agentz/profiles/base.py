@@ -100,8 +100,12 @@ def load_all_profiles():
                     # Add _key attribute to profile for automatic name derivation
                     obj._key = key
                     profiles[key] = obj
-        except Exception:
-            pass
+                    
+        except Exception as e:
+            print(e)
+            print(key)
+            import ipdb
+            ipdb.set_trace()
 
     return profiles
 
