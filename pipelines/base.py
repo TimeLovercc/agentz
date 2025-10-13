@@ -165,7 +165,7 @@ class BasePipeline:
             self._executor = AgentExecutor(tracker)
         else:
             # Executor holds a reference to the tracker; update it in case it changed
-            self._executor.context = tracker
+            self._executor.tracker = tracker
         return self._executor
 
     # ============================================
