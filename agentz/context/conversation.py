@@ -167,6 +167,32 @@ class ConversationState(BaseModel):
         for iteration in self.iterations:
             iteration.mark_summarized()
 
+    def format_context_prompt(self, current_input: Optional[str] = None) -> str:
+        """Format a comprehensive context prompt including query, history, and current input.
+
+        Args:
+            current_input: The current input/payload for this agent call
+
+        Returns:
+            Formatted context prompt string
+        """
+        sections = []
+
+        # Add original query if available
+        if self.query:
+            sections.append(f"[ORIGINAL QUERY]\n{self.query}")
+
+        # Add previous iteration history (excluding current iteration)
+        history = self.iteration_history(include_current=False)
+        if history:
+            sections.append(f"[PREVIOUS ITERATIONS]\n{history}")
+
+        # Add current input if provided
+        if current_input:
+            sections.append(f"[CURRENT INPUT]\n{current_input}")
+
+        return "\n\n".join(sections).strip()
+
 
 def create_conversation_state(profiles: Dict[str, Profile]) -> "ConversationState":
     models: List[Type[BaseModel]] = []

@@ -77,13 +77,13 @@ class AgentExecutor:
     - Sync/async execution
     """
 
-    def __init__(self, context: RuntimeTracker):
+    def __init__(self, tracker: RuntimeTracker):
         """Initialize executor with runtime tracker.
 
         Args:
-            context: RuntimeTracker for tracing, printing, etc.
+            tracker: RuntimeTracker for tracing, printing, etc.
         """
-        self.context = context
+        self.tracker = tracker
 
     async def execute_step(self, step: AgentStep) -> Any:
         """Execute an AgentStep.
@@ -165,23 +165,23 @@ class AgentExecutor:
 
         span_factory = agent_span if span_type == "agent" else function_span
 
-        reporter = self.context.reporter
+        reporter = self.tracker.reporter
         step_id: Optional[str] = None
         if reporter:
-            step_id = f"{self.context.iteration}-{span_name}-{time.time_ns()}"
+            step_id = f"{self.tracker.iteration}-{span_name}-{time.time_ns()}"
             reporter.record_agent_step_start(
                 step_id=step_id,
                 agent_name=str(agent_name),
                 span_name=span_name,
-                iteration=self.context.iteration,
+                iteration=self.tracker.iteration,
                 group_id=printer_group_id,
                 printer_title=printer_title,
             )
 
         full_printer_key: Optional[str] = None
         if printer_key:
-            full_printer_key = f"iter:{self.context.iteration}:{printer_key}"
-            self.context.update_printer(
+            full_printer_key = f"iter:{self.tracker.iteration}:{printer_key}"
+            self.tracker.update_printer(
                 full_printer_key,
                 "Working...",
                 title=printer_title or printer_key,
@@ -194,19 +194,21 @@ class AgentExecutor:
         start_time = time.perf_counter()
 
         try:
-            with self.context.span_context(span_factory, name=span_name, **span_kwargs) as span:
+            with self.tracker.span_context(span_factory, name=span_name, **span_kwargs) as span:
                 # Activate context so tools can access it
-                with self.context.activate():
+                with self.tracker.activate():
+                    # import ipdb
+                    # ipdb.set_trace()
                     if sync:
-                        result = Runner.run_sync(agent, instructions, context=self.context.data_store)
+                        result = Runner.run_sync(agent, instructions, context=self.tracker.data_store)
                     else:
-                        result = await Runner.run(agent, instructions, context=self.context.data_store)
+                        result = await Runner.run(agent, instructions, context=self.tracker.data_store)
 
                 raw_output = getattr(result, "final_output", result)
 
                 # Update printer status and emit detailed output as a standalone panel
                 if full_printer_key:
-                    self.context.update_printer(
+                    self.tracker.update_printer(
                         full_printer_key,
                         "Completed",
                         is_done=True,
@@ -226,11 +228,11 @@ class AgentExecutor:
                         panel_content = str(raw_output)
 
                     if panel_content.strip():
-                        self.context.log_panel(
+                        self.tracker.log_panel(
                             printer_title or printer_key,
                             panel_content,
                             border_style=printer_border_style,
-                            iteration=self.context.iteration,
+                            iteration=self.tracker.iteration,
                             group_id=printer_group_id,
                         )
 
@@ -292,9 +294,9 @@ class AgentExecutor:
         span_factory = agent_span if span_type == "agent" else function_span
 
         if start_message:
-            self.context.update_printer(step_key, start_message)
+            self.tracker.update_printer(step_key, start_message)
 
-        with self.context.span_context(span_factory, name=span_name, **span_kwargs) as span:
+        with self.tracker.span_context(span_factory, name=span_name, **span_kwargs) as span:
             # Execute callable or await coroutine
             if asyncio.iscoroutine(callable_or_coro):
                 result = await callable_or_coro
@@ -315,6 +317,6 @@ class AgentExecutor:
                     span.set_output({"result": str(result)[:200]})
 
             if done_message:
-                self.context.update_printer(step_key, done_message, is_done=True)
+                self.tracker.update_printer(step_key, done_message, is_done=True)
 
             return result

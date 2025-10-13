@@ -24,6 +24,7 @@ class ContextAgent(Agent[TContext]):
         prompt_builder: PromptBuilder | None = None,
         default_span_type: str = "agent",
         output_parser: Optional[Callable[[str], Any]] = None,
+        auto_inject_context: bool = True,
         **kwargs: Any,
     ) -> None:
         if output_model and kwargs.get("output_type"):
@@ -38,6 +39,7 @@ class ContextAgent(Agent[TContext]):
         self.prompt_builder = prompt_builder
         self.default_span_type = default_span_type
         self.output_parser = output_parser
+        self.auto_inject_context = auto_inject_context  # Whether to automatically inject context in __call__
         self._pipeline = None  # Optional pipeline reference for context-aware execution
         self._role = None  # Optional role identifier for automatic iteration tracking
 
@@ -170,6 +172,44 @@ class ContextAgent(Agent[TContext]):
 
         return str(validated)
 
+    def build_contextual_instructions(self, payload: Any = None) -> str:
+        """Build instructions with automatic context injection from pipeline state.
+
+        This method compiles instructions that include:
+        - Original query from pipeline.context.state.query
+        - Previous iteration history from pipeline.context.state.iteration_history()
+        - Current input payload
+
+        Args:
+            payload: Current input data for the agent
+
+        Returns:
+            Formatted instructions string with full context
+
+        Note:
+            This method requires self._pipeline to be set and have a context.state attribute.
+        """
+        # Convert payload to string
+        if isinstance(payload, str):
+            current_input = payload
+        elif isinstance(payload, BaseModel):
+            current_input = payload.model_dump_json(indent=2)
+        elif isinstance(payload, dict):
+            import json
+            current_input = json.dumps(payload, indent=2)
+        elif payload is None:
+            current_input = None
+        else:
+            current_input = str(payload)
+
+        # Get context from pipeline
+        if self._pipeline is None or not hasattr(self._pipeline, 'context'):
+            # Fallback to regular instruction building if no pipeline context
+            return current_input or ""
+
+        state = self._pipeline.context.state
+        return state.format_context_prompt(current_input=current_input)
+
     async def invoke(
         self,
         *,
@@ -221,21 +261,25 @@ class ContextAgent(Agent[TContext]):
         Returns:
             Parsed output if in pipeline context, otherwise RunResult
         """
-        # Build prompt with non-strict input coercion
-        # This allows string inputs to pass through without validation errors
-        validated = self._coerce_input(payload, strict=False)
-
-        if isinstance(validated, str):
-            instructions = validated
-        elif isinstance(validated, BaseModel):
-            instructions = validated.model_dump_json(indent=2)
-        elif isinstance(validated, dict):
-            import json
-            instructions = json.dumps(validated, indent=2)
-        elif validated is None and isinstance(self.instructions, str):
-            instructions = self.instructions
+        # Build instructions with automatic context injection if enabled
+        if self.auto_inject_context and self._pipeline is not None and hasattr(self._pipeline, 'context'):
+            instructions = self.build_contextual_instructions(payload)
         else:
-            instructions = str(validated)
+            # Build prompt with non-strict input coercion
+            # This allows string inputs to pass through without validation errors
+            validated = self._coerce_input(payload, strict=False)
+
+            if isinstance(validated, str):
+                instructions = validated
+            elif isinstance(validated, BaseModel):
+                instructions = validated.model_dump_json(indent=2)
+            elif isinstance(validated, dict):
+                import json
+                instructions = json.dumps(validated, indent=2)
+            elif validated is None and isinstance(self.instructions, str):
+                instructions = self.instructions
+            else:
+                instructions = str(validated)
 
         # If pipeline context is available, use it for full tracking
         if self._pipeline is not None:
