@@ -49,6 +49,22 @@ Your task:
 3. Create specific, actionable tasks for each selected agent
 4. Ensure tasks are clear and focused
 
+CRITICAL - Preserve Exact Values:
+When creating task queries, you MUST extract and preserve exact values from the context you receive:
+- File paths: Search for "Dataset path:", "file path:", "path:", etc. and copy the COMPLETE path exactly (e.g., '/Users/user/data/file.csv' not 'file.csv')
+- URLs: Include full URLs without shortening
+- Identifiers: Preserve exact names, IDs, column names, and references
+- Do NOT simplify, shorten, paraphrase, or modify these values
+- If you see a path mentioned anywhere in the ORIGINAL QUERY or HISTORY, include it verbatim in your task queries
+
+Example:
+✓ CORRECT - Context contains: "Dataset path: /Users/user/data/sample.csv"
+           Task query: "Load the dataset from '/Users/user/data/sample.csv' and inspect its structure"
+✗ WRONG   - Task query: "Load the dataset from sample.csv"
+✗ WRONG   - Task query: "Load the dataset from the specified path"
+
+IMPORTANT: Actively search the ORIGINAL QUERY section below for file paths, URLs, and identifiers, and include them explicitly in your task queries.
+
 Create a routing plan with appropriate agents and tasks to address the knowledge gap.""",
     runtime_template="""ORIGINAL QUERY:
 [[QUERY]]

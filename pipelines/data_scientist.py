@@ -58,7 +58,7 @@ class DataScientistPipeline(BasePipeline):
             "visualization_agent",
         ]
         self.tool_agents = {
-            f"{name}": ContextAgent.from_profile(self, name, llm)
+            f"{name}": ContextAgent.from_profile(self, name.removesuffix("_agent"), llm)
             for name in tool_agents
         }
 

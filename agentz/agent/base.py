@@ -7,6 +7,8 @@ from pydantic import BaseModel
 
 from agents import Agent, RunResult
 from agents.run_context import TContext
+from agentz.llm.llm_setup import model_supports_json_and_tool_calls
+from agentz.utils.parsers import create_type_parser
 
 PromptBuilder = Callable[[Any, Any, "ContextAgent"], str]
 
@@ -64,20 +66,38 @@ class ContextAgent(Agent[TContext]):
         # Auto-derive name from role
         agent_name = role + "_agent" if role != "agent" else "agent"
 
-        # Get tools, default to empty list if None
-        # Note: Tools in profiles are currently string names, not resolved objects
-        # This causes errors in the agents library which expects tool objects
-        # For now, pass empty list to avoid runtime errors
-        # TODO: Implement tool resolution to make tools actually work
-        tools = []
+        # Get tools and output schema from profile
+        tools = profile.tools or []
+        output_schema = getattr(profile, "output_schema", None)
+
+        # Check if model supports both structured output and tools
+        # If not, use output_parser instead of output_model
+        output_model = None
+        output_parser = None
+        instructions = profile.instructions
+
+        if output_schema and tools and not model_supports_json_and_tool_calls(llm):
+            # Model doesn't support both - use parser instead
+            output_parser = create_type_parser(output_schema)
+            # Replace [[OUTPUT_SCHEMA]] placeholder with actual schema
+            if "[[OUTPUT_SCHEMA]]" in instructions:
+                schema_json = json.dumps(output_schema.model_json_schema(), indent=2)
+                instructions = instructions.replace("[[OUTPUT_SCHEMA]]", schema_json)
+        elif output_schema:
+            # Model supports both or no tools present - use structured output
+            output_model = output_schema
+            # Remove [[OUTPUT_SCHEMA]] placeholder since structured output enforces it
+            if "[[OUTPUT_SCHEMA]]" in instructions:
+                instructions = instructions.replace("[[OUTPUT_SCHEMA]]", "")
 
         agent = cls(
             name=agent_name,
-            instructions=profile.instructions,
-            output_model=getattr(profile, "output_schema", None),
+            instructions=instructions,
+            output_model=output_model,
             input_model=getattr(profile, "input_schema", None),
             tools=tools,
             model=llm,
+            output_parser=output_parser,
         )
 
         # Bind agent to pipeline with role
@@ -258,5 +278,7 @@ class ContextAgent(Agent[TContext]):
     async def parse_output(self, run_result: RunResult) -> RunResult:
         """Apply legacy string parser only when no structured output is configured."""
         if self.output_parser and self.output_model is None:
+            # import ipdb
+            # ipdb.set_trace()
             run_result.final_output = self.output_parser(run_result.final_output)
         return run_result

@@ -1,6 +1,6 @@
 from __future__ import annotations
 import re
-from typing import Optional, List, Type, Set
+from typing import Optional, List, Type, Set, Any
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -16,7 +16,7 @@ class Profile(BaseModel):
     model: Optional[str] = Field(default=None, description="Model override for this profile (e.g., 'gpt-4', 'claude-3-5-sonnet')")
     output_schema: Optional[Type[BaseModel]] = Field(default=None, description="Pydantic model class for structured output validation")
     input_schema: Optional[Type[BaseModel]] = Field(default=None, description="Pydantic model class for input validation")
-    tools: Optional[List[str]] = Field(default=None, description="List of tools to use for this profile")
+    tools: Optional[List[Any]] = Field(default=None, description="List of tool objects (e.g., FunctionTool instances) to use for this profile")
 
     class Config:
         arbitrary_types_allowed = True

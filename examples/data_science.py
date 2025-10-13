@@ -5,7 +5,7 @@ pipe = DataScientistPipeline("pipelines/configs/data_science.yaml")
 
 query = DataScienceQuery(
     prompt="Analyze the dataset and build a predictive model",
-    data_path="data/sample.csv"
+    data_path="/Users/zhimeng/workspaces/agentz/data/banana_quality.csv"
 )
 
 pipe.run_sync(query)
