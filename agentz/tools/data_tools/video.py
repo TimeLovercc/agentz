@@ -5,14 +5,14 @@ import os
 from pathlib import Path
 from agents import function_tool
 from agents.run_context import RunContextWrapper
-from agentz.context.pipeline_context import PipelineDataStore
+from agentz.context.data_store import DataStore
 from loguru import logger
 import google.generativeai as genai
 
 
 @function_tool
 async def video_qa(
-    ctx: RunContextWrapper[PipelineDataStore],
+    ctx: RunContextWrapper[DataStore],
     video_url: str,
     question: str
 ) -> Union[str, Dict[str, Any]]:

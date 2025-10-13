@@ -7,7 +7,7 @@ from io import BytesIO
 from pathlib import Path
 from agents import function_tool
 from agents.run_context import RunContextWrapper
-from agentz.context.pipeline_context import PipelineDataStore
+from agentz.context.data_store import DataStore
 from loguru import logger
 import google.generativeai as genai
 from PIL import Image
@@ -69,7 +69,7 @@ def _image_to_base64(image: Image.Image) -> str:
 
 @function_tool
 async def image_qa(
-    ctx: RunContextWrapper[PipelineDataStore],
+    ctx: RunContextWrapper[DataStore],
     image_path: str,
     question: Optional[str] = None
 ) -> Union[str, Dict[str, Any]]:
