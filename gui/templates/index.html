@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentZ - AI Assistant</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h1>🤖 AgentZ</h1>
+                <button id="new-chat-btn" class="new-chat-btn">+ New Chat</button>
+            </div>
+
+            <div class="pipeline-selector">
+                <label for="pipeline-select">Select Pipeline:</label>
+                <select id="pipeline-select" class="pipeline-dropdown">
+                    <option value="">-- Choose Pipeline --</option>
+                    {% for key, config in pipelines.items() %}
+                    <option value="{{ key }}" title="{{ config.description }}">
+                        {{ config.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+                <div id="pipeline-description" class="pipeline-description"></div>
+            </div>
+
+            <div class="sidebar-footer">
+                <div class="info">
+                    <p>💡 Select a pipeline to start chatting</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Chat Area -->
+        <div class="main-content">
+            <!-- Header -->
+            <div class="chat-header">
+                <h2 id="current-pipeline-name">AgentZ Assistant</h2>
+                <button id="clear-chat-btn" class="clear-btn">🗑️ Clear</button>
+            </div>
+
+            <!-- Messages Container -->
+            <div id="messages-container" class="messages-container">
+                <div class="welcome-message">
+                    <h2>Welcome to AgentZ! 👋</h2>
+                    <p>Select a pipeline from the sidebar to get started.</p>
+                    <div class="features">
+                        <div class="feature">
+                            <span class="icon">🔍</span>
+                            <span>Web Search</span>
+                        </div>
+                        <div class="feature">
+                            <span class="icon">📊</span>
+                            <span>Data Analysis</span>
+                        </div>
+                        <div class="feature">
+                            <span class="icon">💬</span>
+                            <span>Chat Assistant</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Input Area -->
+            <div class="input-area">
+                <div class="input-container">
+                    <textarea
+                        id="user-input"
+                        class="user-input"
+                        placeholder="Type your message here... (Press Enter to send, Shift+Enter for new line)"
+                        rows="1"
+                        disabled
+                    ></textarea>
+                    <button id="send-btn" class="send-btn" disabled>
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                            <path d="M7 11L12 6L17 11M12 18V7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="input-footer">
+                    <span id="status-text">Select a pipeline to enable chat</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+</body>
+</html>
