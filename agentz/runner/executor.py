@@ -197,8 +197,10 @@ class AgentExecutor:
             with self.tracker.span_context(span_factory, name=span_name, **span_kwargs) as span:
                 # Activate context so tools can access it
                 with self.tracker.activate():
+                    # if agent.name.startswith("data"):
                     # import ipdb
                     # ipdb.set_trace()
+                    # print(instructions)
                     if sync:
                         result = Runner.run_sync(agent, instructions, context=self.tracker.data_store)
                     else:

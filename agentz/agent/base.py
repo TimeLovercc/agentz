@@ -105,6 +105,7 @@ class ContextAgent(Agent[TContext]):
         # Bind agent to pipeline with role
         agent._pipeline = pipeline
         agent._role = role
+        agent._profile = profile  # Store profile for runtime_template access
 
         return agent
 
@@ -176,6 +177,7 @@ class ContextAgent(Agent[TContext]):
         """Build instructions with automatic context injection from pipeline state.
 
         This method compiles instructions that include:
+        - Runtime template rendering with placeholders filled from state (if profile has runtime_template)
         - Original query from pipeline.context.state.query
         - Previous iteration history from pipeline.context.state.iteration_history()
         - Current input payload
@@ -208,6 +210,59 @@ class ContextAgent(Agent[TContext]):
             return current_input or ""
 
         state = self._pipeline.context.state
+
+        # Check if profile has runtime_template
+        profile = getattr(self, '_profile', None)
+        if profile and hasattr(profile, 'runtime_template') and profile.runtime_template:
+            # Build context dict with values from state for template rendering
+            context_dict = {}
+
+            # ITERATION: current iteration number
+            try:
+                context_dict['ITERATION'] = str(self._pipeline.iteration)
+            except Exception:
+                try:
+                    context_dict['ITERATION'] = str(state.current_iteration.index)
+                except Exception:
+                    context_dict['ITERATION'] = '1'
+
+            # QUERY: original query
+            if state.query:
+                context_dict['QUERY'] = state.query
+            else:
+                context_dict['QUERY'] = ''
+
+            # HISTORY: previous iteration history
+            try:
+                history = state.iteration_history(include_current=False)
+                context_dict['HISTORY'] = history if history else 'No previous iterations.'
+            except Exception:
+                context_dict['HISTORY'] = 'No previous iterations.'
+
+            # OBSERVATION: current iteration observation (if available)
+            try:
+                observation = state.current_iteration.observation
+                if observation:
+                    context_dict['OBSERVATION'] = observation
+                else:
+                    context_dict['OBSERVATION'] = ''
+            except Exception:
+                context_dict['OBSERVATION'] = ''
+
+            # INPUT / TASK / GAP: current payload (use same value for all these aliases)
+            if current_input:
+                context_dict['INPUT'] = current_input
+                context_dict['TASK'] = current_input
+                context_dict['GAP'] = current_input
+            else:
+                context_dict['INPUT'] = ''
+                context_dict['TASK'] = ''
+                context_dict['GAP'] = ''
+
+            # Render the runtime_template with context values
+            return profile.render(**context_dict)
+
+        # Fallback to original format_context_prompt if no runtime_template
         return state.format_context_prompt(current_input=current_input)
 
     async def invoke(
