@@ -4,6 +4,8 @@ from pydantic import BaseModel, Field
 
 from agentz.profiles.base import Profile, ToolAgentOutput
 
+from agents import WebSearchTool
+
 
 class TaskInput(BaseModel):
     """Input schema for task-based runtime template."""
@@ -11,7 +13,7 @@ class TaskInput(BaseModel):
 
 
 # Profile instance for web searcher agent
-web_searcher_agent_profile = Profile(
+web_searcher_profile = Profile(
     instructions="""You are a web search specialist. Your task is to search the web for information.
 
 Steps:
@@ -26,6 +28,6 @@ Output JSON only following this schema:
     runtime_template="[[TASK]]",
     output_schema=ToolAgentOutput,
     input_schema=TaskInput,
-    tools=["web_search"],
+    tools=[WebSearchTool()],
     model=None
 )

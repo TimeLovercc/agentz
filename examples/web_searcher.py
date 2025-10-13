@@ -26,9 +26,9 @@ EVALUATE_AGENT = Agent(
 ROUTING_AGENT = Agent(
     name="Priority Router",
     instructions=(
-        "Analyse outstanding gaps and assign tasks to tool agents. Ensure preprocessing "
-        "and evaluation steps are scheduled before model retraining. Reply as JSON that "
-        "conforms to AgentSelectionPlan."
+        "Analyse outstanding gaps and assign tasks to tool agents. "
+        "Available agent: web_searcher - Search the web for information. "
+        "Reply as JSON that conforms to AgentSelectionPlan."
     ),
 )
 
