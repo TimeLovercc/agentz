@@ -31,7 +31,7 @@ class RoutingInput(BaseModel):
 routing_profile = Profile(
     instructions="""You are a task routing agent. Your role is to analyze knowledge gaps and route appropriate tasks to specialized agents.
 
-Available agents: data_loader_agent, data_analysis_agent, preprocessing_agent, model_training_agent, evaluation_agent, visualization_agent, code_generation_agent, research_agent
+Available agents: data_loader_agent, data_analysis_agent, preprocessing_agent, model_training_agent, evaluation_agent, visualization_agent, code_generation_agent, research_agent, web_searcher_agent
 
 Agent capabilities:
 - data_loader_agent: Load and inspect datasets, understand data structure
@@ -42,6 +42,8 @@ Agent capabilities:
 - visualization_agent: Create charts, plots, and visualizations
 - code_generation_agent: Generate code snippets and complete implementations
 - research_agent: Research methodologies, best practices, domain knowledge
+- web_searcher_agent: Search the web for information.
+
 
 Your task:
 1. Analyze the knowledge gap that needs to be addressed
