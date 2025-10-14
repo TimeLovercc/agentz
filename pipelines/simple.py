@@ -1,78 +1,98 @@
 from __future__ import annotations
 
+from typing import Any
+
 from loguru import logger
+from pydantic import BaseModel
 
 from agentz.agent.base import ContextAgent
-from agentz.profiles.base import load_all_profiles
+from agentz.context.context import Context
+from agentz.profiles.base import ToolAgentOutput
+from agentz.profiles.manager.routing import AgentSelectionPlan, AgentTask, RoutingInput
 from pipelines.base import BasePipeline
 
 
+class SimpleQuery(BaseModel):
+    """Lightweight query model for the simple pipeline."""
+    prompt: str
+
+    def format(self) -> str:
+        """Render the query into the routing-friendly prompt."""
+        return f"Task: {self.prompt}"
+
+
 class SimplePipeline(BasePipeline):
-    """Simple two-agent pipeline: routing agent + single tool agent."""
+    """Single-pass pipeline that routes directly to the web searcher tool."""
 
     def __init__(self, config):
         super().__init__(config)
 
-        # Load profiles for template rendering
-        self.profiles = load_all_profiles()
+        # Initialize shared context (profiles + conversation state)
+        self.context = Context(["profiles", "states"])
         llm = self.config.llm.main_model
 
-        # Setup routing agent
-        self.routing_agent = ContextAgent.from_profile(self.profiles["routing"], llm)
+        # Bind agents from registered profiles
+        self.routing_agent = ContextAgent.from_profile(self, "routing", llm)
+        self.tool_agent = ContextAgent.from_profile(self, "web_searcher", llm)
 
-        # Setup single tool agent
-        self.tool_agent = ContextAgent.from_profile(self.profiles["data_loader"], llm)
+    async def initialize_pipeline(self, query: Any) -> None:
+        """Ensure a SimpleQuery is available when the pipeline starts."""
+        if query is None:
+            prompt = self.config.prompt or "Analyze the dataset and provide insights."
+            query = SimpleQuery(prompt=prompt)
+        elif not isinstance(query, SimpleQuery):
+            # Coerce arbitrary input into SimpleQuery for consistent formatting
+            prompt = getattr(query, "prompt", None) or str(query)
+            query = SimpleQuery(prompt=prompt)
 
-    async def run(self):
-        """Run the simple pipeline with single-pass execution."""
-        logger.info(f"Data path: {self.config.data_path}")
+        await super().initialize_pipeline(query)
+
+    async def execute(self) -> ToolAgentOutput:
+        """Route the query once and execute the web searcher agent."""
         logger.info(f"User prompt: {self.config.prompt}")
 
-        # Prepare query
-        query = self.prepare_query(
-            content=f"Task: {self.config.prompt}\n"
-                f"Dataset path: {self.config.data_path}\n"
-                "Analyze the data and provide insights"
-        )
+        # Start single iteration for structured logging
+        _, group_id = self.begin_iteration(title="Single Pass")
+        try:
+            routing_input = RoutingInput(
+                query=self.context.state.query or "",
+                gap="Route the query to the web_searcher_agent",
+                history=self.context.state.iteration_history(include_current=False) or "",
+            )
 
-        # Route the task
-        # self.update_printer("route", "Routing task to agent...")
-        routing_instructions = self.profiles["routing"].render(
-            QUERY=query,
-            GAP="Route the query to the data_analysis_agent",
-            HISTORY=""
-        )
-        selection_plan = await self.agent_step(
-            agent=self.routing_agent,
-            instructions=routing_instructions,
-            span_name="route_task",
-            span_type="agent",
-            output_model=self.routing_agent.output_type,
-            printer_key="route",
-            printer_title="Routing",
-        )
-        # self.update_printer("route", "Task routed", is_done=True)
+            routing_plan = await self.routing_agent(routing_input, group_id=group_id)
+            task = self._select_task(routing_plan)
 
-        # Execute the tool agent
-        task = selection_plan.tasks[0]
-        # self.update_printer("tool", f"Executing {task.agent}...")
-        
-        # import ipdb
-        # ipdb.set_trace()
+            tool_payload = (
+                self.tool_agent.input_model(task=task.query)
+                if self.tool_agent.input_model
+                else task.query
+            )
 
-        result = await self.agent_step(
-            agent=self.tool_agent,
-            instructions=task.model_dump_json(),
-            span_name=task.agent,
-            span_type="tool",
-            printer_key="tool",
-            printer_title=f"Tool: {task.agent}",
-        )
-        # import ipdb
-        # ipdb.set_trace()
+            result = await self.tool_agent(tool_payload, group_id=group_id)
 
-        # self.update_printer("tool", f"Completed {task.agent}", is_done=True)
+            if self.state:
+                self.state.final_report = result.output
+                self.state.mark_research_complete()
 
-        logger.info("Simple pipeline completed")
+            logger.info("Simple pipeline completed")
+            return result
+        finally:
+            self.end_iteration(group_id)
+
+    async def finalize(self, result: Any) -> Any:
+        """Return the tool output directly."""
         return result
-    
+
+    @staticmethod
+    def _select_task(plan: AgentSelectionPlan) -> AgentTask:
+        """Pick the first web searcher task from the routing plan."""
+        if not plan or not plan.tasks:
+            raise ValueError("Routing agent did not return any tasks.")
+
+        for task in plan.tasks:
+            if task.agent == "web_searcher_agent":
+                return task
+
+        # Fallback: take the first task when a specific agent isn't assigned
+        return plan.tasks[0]

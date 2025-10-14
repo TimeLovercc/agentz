@@ -1,16 +1,14 @@
 # Simple Pipeline Configuration - Two Agent Pipeline
 
 # Provider configuration
-provider: "gemini"
-model: "gemini-2.5-flash"
-api_key: "${GEMINI_API_KEY}"
+provider: "deepseek"
+model: "deepseek-chat"
+api_key: "${DEEPSEEK_API_KEY}"
 
 # Dataset defaults
 data:
-  path: "/Users/zhimeng/workspaces/agentz/data/banana_quality.csv"
   prompt: |
-    Analyze the banana quality dataset and provide insights about the data distributions,
-    correlations, and patterns.
+    Find the outstanding papers of ACL 2025, extract their title, author list, keywords, abstract, url in one sentence.
 
 # Pipeline settings
 pipeline:
@@ -19,7 +17,7 @@ pipeline:
 # Agent profiles
 agents:
   routing_agent:
-  agentz/memory/behavior_profiles.py    profile: routing_agent_simple
+    profile: routing_agent_simple
 
-  data_analysis_agent:
-    profile: data_analysis_agent
+  web_searcher_agent:
+    profile: web_searcher
