@@ -6,7 +6,7 @@
 
 </div>
 
-AgentZ is a context-central multi-agent systems framework. AgentZ focuses on efficiently managing the context of each agent, binds all agents through centralized context engineering. Context-central design philosophy significantly improves the reusage of key components and eases the development and maintainence of scaled multi-agent system.
+AgentZ is a context-central multi-agent systems framework. AgentZ focuses on efficiently managing the context of each agent, binds all agents through centralized context engineering. Context-central design philosophy significantly improves the reusage of key components and eases the development and maintenance of scaled multi-agent system.
 
 ## Features
 
