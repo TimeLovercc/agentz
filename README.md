@@ -2,20 +2,20 @@
 
 # AgentZ: Agent from Zero
 
-**A Research-Oriented Multi-Agent System Platform**
+**A Context-Central Multi-Agent System Platform**
 
 </div>
 
-AgentZ is a minimal, extensible codebase for multi-agent systems research. Build intelligent agent workflows with minimal code while achieving strong baseline performance. The platform enables autonomous reasoning, experience learning, and dynamic tool creation - providing both a comparative baseline and production-ready foundation for multi-agent research.
+AgentZ is a context-central multi-agent systems framework. AgentZ focuses on efficiently managing the context of each agent, binds all agents through centralized context engineering. Context-central design philosophy significantly improves the reusage of key components and eases the development and maintainence of scaled multi-agent system.
 
 ## Features
 
-- **🎯 Minimal Implementation** - Build new systems with just a few lines of code
-- **🔄 Stateful Workflows** - Persistent memory and object management throughout agent lifecycle
-- **📚 Experience Learning** - Agents improve over time through memory-based reasoning
-- **🛠️ Dynamic Tool Creation** - Agents can generate and use custom tools on-demand
-- **🧠 Autonomous Reasoning** - Built-in cognitive capabilities for complex multi-step tasks
-- **⚙️ Config-Driven** - Easily modify behavior through configuration files
+- **🎯 Context-Central Architecture** - All agents share and interact through centralized context state
+- **🔄 Component Reusability** - Unified context design enables easy reuse of agents, tools, and flows
+- **📚 Declarative Flows** - Define complex multi-agent workflows through structured, declarative specifications
+- **🛠️ Stateful Execution** - Persistent conversation state tracks all agent interactions and tool results
+- **🧠 Structured IO Contracts** - Type-safe communication between agents via Pydantic models
+- **⚙️ Scalable Development** - Simplified maintenance and extension of multi-agent systems
 
 ## Installation
 
@@ -166,11 +166,11 @@ custom `run()` logic is required beyond sequencing the flow runner.
 
 ## Benchmarks
 
-AgentZ has been verified on several benchmarks for multi-agent research:
+AgentZ's context-central design has been validated on multiple research benchmarks:
 
-- **Data Science Tasks**: State-of-the-art performance on automated ML pipelines
-- **Complex Reasoning**: Competitive results on multi-step reasoning benchmarks
-- **Tool Usage**: High accuracy in dynamic tool selection and execution
+- **Data Science Tasks**: Efficient context sharing enables streamlined automated ML pipelines
+- **Complex Reasoning**: Centralized state tracking improves multi-step reasoning coordination
+- **Scalability**: Reduced overhead through component reuse in large-scale multi-agent systems
 
 *Detailed benchmark results and comparisons coming soon.*
 
@@ -184,19 +184,19 @@ AgentZ has been verified on several benchmarks for multi-agent research:
 
 ## Key Design Principles
 
-1. **Minimal Core** - Keep the base system simple and extensible
-2. **Intelligent Defaults** - Provide strong baseline implementations
-3. **Research-First** - Design for experimentation and comparison
-4. **Modular Architecture** - Easy to swap components and test variations
-5. **Production-Ready** - Scale from research prototypes to deployed systems
+1. **Context-Central** - All agents communicate through shared, centralized context state
+2. **Component Reusability** - Unified context engineering maximizes code reuse across agents
+3. **Declarative Over Imperative** - Define workflows through structured specifications, not manual orchestration
+4. **Structured State Management** - Type-safe IO contracts ensure reliable agent coordination
+5. **Scalable by Design** - Simplified development and maintenance of large multi-agent systems
 
 ## Use Cases
 
-- **Multi-Agent Research** - Baseline for comparing agent architectures
-- **Automated Data Science** - End-to-end ML pipeline automation
-- **Complex Task Decomposition** - Break down and solve multi-step problems
-- **Tool-Using Agents** - Research on dynamic tool creation and usage
-- **Agent Memory Systems** - Study persistence and experience learning
+- **Multi-Agent Research** - Study context-sharing patterns and agent coordination strategies
+- **Automated Data Science** - Build reusable, stateful ML pipeline automation systems
+- **Complex Workflow Orchestration** - Design scalable multi-step agent collaborations
+- **Enterprise AI Systems** - Develop maintainable, large-scale agent deployments
+- **Agent Architecture Comparison** - Benchmark different approaches with consistent context management
 
 ## Citation
 
@@ -204,10 +204,10 @@ If you use AgentZ in your research, please cite:
 
 ```bibtex
 @software{agentz2025,
-  title={AgentZ: A Research-Oriented Multi-Agent System Platform},
-  author={Your Name},
+  title={AgentZ: A Context-Central Multi-Agent Systems Framework},
+  author={Zhimeng Guo, Hangfan Zhang, Minghao Chen},
   year={2025},
-  url={https://github.com/yourusername/agentz}
+  url={https://https://github.com/TimeLovercc/agentz}
 }
 ```
 
@@ -215,13 +215,10 @@ If you use AgentZ in your research, please cite:
 
 We welcome contributions! AgentZ is designed to be a community resource for multi-agent research. Please open an issue or submit a pull request.
 
-## License
-
-[Your License Here]
 
 ## Acknowledgements
 
-AgentZ is built with inspiration from the multi-agent systems research community. We thank the developers of various LLM frameworks and tools that make this work possible.
+AgentZ's context-central design is inspired by the multi-agent systems research community and best practices in distributed state management. We thank the developers of LLM frameworks and orchestration tools that informed this architecture.
 
 ---
 
