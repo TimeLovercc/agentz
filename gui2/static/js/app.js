@@ -5,6 +5,8 @@ const state = {
     runs: {},
     runOrder: [],
     events: {},
+    iterations: {},
+    detailViewState: {},
     selectedRunId: null,
     runStream: null,
     pollingTimer: null,
@@ -226,6 +228,14 @@ function addOrUpdateRun(run) {
         state.events[run.id] = [];
     }
 
+    if (!state.iterations[run.id]) {
+        state.iterations[run.id] = { order: [], map: {} };
+    }
+
+    if (!state.detailViewState[run.id]) {
+        state.detailViewState[run.id] = { fullLogsExpanded: false };
+    }
+
     renderRunList();
 }
 
@@ -388,7 +398,12 @@ function handleRunEvent(runId, event) {
         state.events[runId] = [];
     }
 
+    if (!state.iterations[runId]) {
+        state.iterations[runId] = { order: [], map: {} };
+    }
+
     if (event.event && event.event !== "stream_end") {
+        updateIterationState(runId, event);
         const entry = normalizeEvent(event.event, event.payload);
         if (entry) {
             state.events[runId].push(entry);
@@ -404,6 +419,7 @@ function handleRunEvent(runId, event) {
             run.error = event.payload.error || run.error;
             run.status = event.payload.status || run.status;
         }
+        finalizeIterationState(runId, run.status);
     }
 
     if (runId === state.selectedRunId) {
@@ -416,49 +432,67 @@ function handleRunEvent(runId, event) {
 
 function normalizeEvent(type, payload = {}) {
     const timestamp = Date.now();
+    const groupId = payload.group_id || null;
 
     switch (type) {
-        case "status_update":
+        case "status_update": {
+            const statusTitle =
+                payload.title ||
+                formatAgentName(payload.item_id || "") ||
+                (payload.content ? payload.content.split(":")[0] : "");
             return {
                 timestamp,
-                title: payload.title || "Status Update",
+                title: statusTitle || "Status Update",
                 message: payload.content || "",
-                type
+                type,
+                groupId,
+                raw: payload
             };
+        }
         case "group_start":
             return {
                 timestamp,
-                title: payload.title || `Group ${payload.group_id || ""}`.trim(),
+                title: payload.title || formatGroupTitle(payload.group_id, ""),
                 message: "Group started",
-                type
+                type,
+                groupId,
+                raw: payload
             };
         case "group_end":
             return {
                 timestamp,
-                title: payload.title || `Group ${payload.group_id || ""}`.trim(),
+                title: payload.title || formatGroupTitle(payload.group_id, ""),
                 message: payload.is_done ? "Group completed" : "Group ended",
-                type
+                type,
+                groupId,
+                raw: payload
             };
         case "log_panel":
             return {
                 timestamp,
                 title: payload.title || "Log Panel",
                 message: payload.content || "",
-                type
+                type,
+                groupId,
+                raw: payload
             };
         case "error":
             return {
                 timestamp,
                 title: "Error",
                 message: payload.message || "Pipeline error",
-                type
+                type,
+                groupId,
+                raw: payload
             };
         case "cancelled":
             return {
                 timestamp,
                 title: "Cancelled",
                 message: payload.message || "Run cancelled",
-                type
+                type,
+                groupId,
+                raw: payload
             };
         case "summary":
             // handled separately
@@ -468,7 +502,9 @@ function normalizeEvent(type, payload = {}) {
                 timestamp,
                 title: type,
                 message: JSON.stringify(payload, null, 2),
-                type
+                type,
+                groupId,
+                raw: payload
             };
     }
 }
@@ -503,42 +539,224 @@ function renderRunDetail(run) {
     const detailStatus = document.createElement("div");
     detailStatus.className = "detail-status";
     const submittedAt = formatTimestamp(run.created_at);
-    detailStatus.textContent = `Submitted ${submittedAt}`;
+    const duration = formatDuration(run.started_at, run.completed_at);
+    detailStatus.textContent = duration
+        ? `Submitted ${submittedAt} • Duration ${duration}`
+        : `Submitted ${submittedAt}`;
 
-    const inputsSection = document.createElement("div");
-    inputsSection.className = "detail-section";
-    inputsSection.innerHTML = "<h4>Inputs</h4>";
-    const inputsPre = document.createElement("pre");
-    inputsPre.textContent = JSON.stringify(run.inputs || {}, null, 2);
-    inputsSection.appendChild(inputsPre);
+    container.appendChild(header);
+    container.appendChild(detailStatus);
 
-    const resultSection = document.createElement("div");
-    resultSection.className = "detail-section";
-    resultSection.innerHTML = "<h4>Result</h4>";
-    const resultPre = document.createElement("pre");
-    resultPre.textContent = run.result || "No result yet.";
-    resultSection.appendChild(resultPre);
+    const eventsEntry = createDetailEntry("Events", buildEventsContent(run));
+    container.appendChild(eventsEntry);
+
+    const viewState = getDetailViewState(run.id);
+    const fullLogsEntry = createDetailEntry(
+        "Full Logs",
+        buildFullLogsContent(run),
+        {
+            collapsible: true,
+            defaultExpanded: !!viewState.fullLogsExpanded,
+            onToggle: (expanded) => {
+                viewState.fullLogsExpanded = expanded;
+            }
+        }
+    );
+    container.appendChild(fullLogsEntry);
+
+    if (shouldShowResultEntry(run)) {
+        const resultEntry = createDetailEntry(
+            "Result",
+            buildResultContent(run)
+        );
+        container.appendChild(resultEntry);
+    }
+}
+
+function createDetailEntry(title, bodyNode, options = {}) {
+    const { collapsible = false, defaultExpanded = true, description = "", onToggle = null } = options;
+
+    const entry = document.createElement("section");
+    entry.className = "detail-entry";
+
+    if (collapsible) {
+        entry.classList.add("collapsible");
+    }
+
+    if (!defaultExpanded) {
+        entry.classList.add("collapsed");
+    }
+
+    const header = document.createElement(collapsible ? "button" : "div");
+    header.className = "detail-entry-header";
+
+    if (collapsible) {
+        header.type = "button";
+    }
+
+    const titleSpan = document.createElement("span");
+    titleSpan.className = "detail-entry-title";
+    titleSpan.textContent = title;
+    header.appendChild(titleSpan);
+
+    if (description) {
+        const descriptionSpan = document.createElement("span");
+        descriptionSpan.className = "detail-entry-description";
+        descriptionSpan.textContent = description;
+        header.appendChild(descriptionSpan);
+    }
+
+    if (collapsible) {
+        const icon = document.createElement("span");
+        icon.className = "toggle-icon";
+        icon.innerHTML = "▾";
+        header.appendChild(icon);
+    }
+
+    const bodyWrapper = document.createElement("div");
+    bodyWrapper.className = "detail-entry-body";
+    bodyWrapper.appendChild(bodyNode);
+
+    entry.appendChild(header);
+    entry.appendChild(bodyWrapper);
+
+    if (collapsible) {
+        header.setAttribute("aria-expanded", defaultExpanded ? "true" : "false");
+        header.addEventListener("click", () => {
+            const isCollapsed = entry.classList.toggle("collapsed");
+            header.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+            if (typeof onToggle === "function") {
+                onToggle(!isCollapsed);
+            }
+        });
+    }
+
+    return entry;
+}
+
+function getDetailViewState(runId) {
+    if (!state.detailViewState[runId]) {
+        state.detailViewState[runId] = { fullLogsExpanded: false };
+    }
+    return state.detailViewState[runId];
+}
+
+function shouldShowResultEntry(run) {
+    const status = (run.status || "").toLowerCase();
+    return ["completed", "error", "cancelled"].includes(status);
+}
+
+function buildEventsContent(run) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "events-summary";
+
+    const store = state.iterations[run.id];
+    const activeIds = store ? store.order.filter((groupId) => store.map[groupId]) : [];
+
+    if (!store || activeIds.length === 0) {
+        const placeholder = document.createElement("p");
+        placeholder.className = "events-empty";
+        const status = (run.status || "").toLowerCase();
+
+        if (status === "running" || status === "queued" || status === "cancelling") {
+            placeholder.textContent = "Waiting for active tasks…";
+        } else if (store && store.terminalStatus === "error") {
+            placeholder.textContent = "Pipeline encountered an error.";
+        } else if (store && store.terminalStatus === "cancelled") {
+            placeholder.textContent = "Pipeline cancelled.";
+        } else if (status === "completed") {
+            placeholder.textContent = "Pipeline completed.";
+        } else {
+            placeholder.textContent = "No active tasks.";
+        }
+
+        wrapper.appendChild(placeholder);
+        return wrapper;
+    }
+
+    activeIds.forEach((groupId) => {
+        const meta = store.map[groupId];
+        if (!meta) return;
+
+        const item = document.createElement("div");
+        item.className = "event-summary-item";
+
+        const summaryHeader = document.createElement("div");
+        summaryHeader.className = "event-summary-header";
+
+        const title = document.createElement("span");
+        title.className = "event-iteration-title";
+        title.textContent = meta.title || formatGroupTitle(groupId);
+
+        const badge = document.createElement("span");
+        badge.className = `status-badge status-${(meta.status || "pending").replace(/\s+/g, "-")}`;
+        badge.textContent = formatStatusLabel(meta.status);
+
+        summaryHeader.appendChild(title);
+        summaryHeader.appendChild(badge);
+
+        const agentLine = document.createElement("p");
+        agentLine.className = "event-agent";
+        if (meta.currentAgent) {
+            agentLine.textContent = `Working agent: ${meta.currentAgent}`;
+        } else if (meta.lastAgent) {
+            agentLine.textContent = `Last agent: ${meta.lastAgent}`;
+        } else {
+            agentLine.textContent = "Waiting for activity";
+        }
+
+        item.appendChild(summaryHeader);
+        item.appendChild(agentLine);
+
+        wrapper.appendChild(item);
+    });
+
+    return wrapper;
+}
+
+function buildFullLogsContent(run) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "full-logs";
+
+    const inputsPre = createPre(JSON.stringify(run.inputs || {}, null, 2));
+    wrapper.appendChild(createDetailSection("Inputs", inputsPre));
+
+    const resultPre = createPre(run.result || "No result yet.");
+    wrapper.appendChild(createDetailSection("Result Snapshot", resultPre));
+
+    if (run.error) {
+        wrapper.appendChild(createDetailSection("Error", createPre(run.error)));
+    }
 
     const eventsSection = document.createElement("div");
     eventsSection.className = "detail-section";
-    eventsSection.innerHTML = "<h4>Events</h4>";
+    eventsSection.innerHTML = "<h4>Event Stream</h4>";
 
     const eventsList = document.createElement("div");
-    eventsList.className = "events-list";
+    eventsList.className = "events-list logs";
 
     const events = state.events[run.id] || [];
     if (events.length === 0) {
-        const empty = document.createElement("div");
-        empty.className = "empty-state";
-        empty.innerHTML = "<h3>No events yet</h3><p>Streaming updates will appear here.</p>";
-        eventsList.appendChild(empty);
+        const placeholder = document.createElement("p");
+        placeholder.className = "events-empty";
+        placeholder.textContent = "No events recorded yet.";
+        eventsList.appendChild(placeholder);
     } else {
         events.forEach((entry) => {
             const item = document.createElement("div");
             item.className = "event-item";
 
-            const heading = document.createElement("h5");
-            heading.textContent = entry.title;
+            const heading = document.createElement("div");
+            heading.className = "event-item-header";
+
+            const title = document.createElement("h5");
+            title.textContent = entry.title;
+            heading.appendChild(title);
+
+            const time = document.createElement("span");
+            time.className = "event-time";
+            time.textContent = formatEventTime(entry.timestamp);
+            heading.appendChild(time);
 
             const message = document.createElement("p");
             message.textContent = entry.message;
@@ -550,22 +768,246 @@ function renderRunDetail(run) {
     }
 
     eventsSection.appendChild(eventsList);
+    wrapper.appendChild(eventsSection);
 
-    const fragments = [header, detailStatus, inputsSection, resultSection];
+    return wrapper;
+}
 
-    if (run.error) {
-        const errorSection = document.createElement("div");
-        errorSection.className = "detail-section";
-        errorSection.innerHTML = "<h4>Error</h4>";
-        const errorPre = document.createElement("pre");
-        errorPre.textContent = run.error;
-        errorSection.appendChild(errorPre);
-        fragments.push(errorSection);
+function buildResultContent(run) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "result-wrapper";
+
+    if (run.completed_at) {
+        const meta = document.createElement("p");
+        meta.className = "result-meta";
+        meta.textContent = `Completed ${formatTimestamp(run.completed_at)}`;
+        wrapper.appendChild(meta);
     }
 
-    fragments.push(eventsSection);
+    wrapper.appendChild(
+        createDetailSection("Final Output", createPre(run.result || "No result captured."))
+    );
 
-    fragments.forEach((node) => container.appendChild(node));
+    if (run.error) {
+        wrapper.appendChild(createDetailSection("Error Details", createPre(run.error)));
+    }
+
+    return wrapper;
+}
+
+function createDetailSection(title, contentNode) {
+    const section = document.createElement("div");
+    section.className = "detail-section";
+    const heading = document.createElement("h4");
+    heading.textContent = title;
+    section.appendChild(heading);
+    section.appendChild(contentNode);
+    return section;
+}
+
+function createPre(content) {
+    const pre = document.createElement("pre");
+    pre.textContent = content;
+    return pre;
+}
+
+function formatEventTime(timestamp) {
+    if (!timestamp) return "";
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function ensureIterationStore(runId) {
+    if (!state.iterations[runId]) {
+        state.iterations[runId] = { order: [], map: {}, terminalStatus: null };
+    }
+    return state.iterations[runId];
+}
+
+function removeIterationEntry(store, groupId) {
+    if (!store || !groupId) return;
+    if (store.map[groupId]) {
+        delete store.map[groupId];
+        store.order = store.order.filter((id) => id !== groupId);
+    }
+}
+
+function updateIterationState(runId, event) {
+    if (!event || !event.event) return;
+    const payload = event.payload || {};
+    const groupId = payload.group_id;
+
+    if (!groupId) {
+        if (event.event === "cancelled" || event.event === "error") {
+            finalizeIterationState(runId, event.event);
+        }
+        return;
+    }
+
+    const store = ensureIterationStore(runId);
+
+    if (!store.map[groupId]) {
+        store.map[groupId] = {
+            title: formatGroupTitle(groupId, payload.title),
+            status: "pending",
+            currentAgent: null,
+            lastAgent: null,
+            lastMessage: "",
+            updatedAt: Date.now()
+        };
+        store.order.push(groupId);
+    }
+
+    const meta = store.map[groupId];
+    meta.updatedAt = Date.now();
+
+    if (payload.title) {
+        meta.title = payload.title;
+    }
+
+    switch (event.event) {
+        case "group_start":
+            meta.status = "running";
+            meta.currentAgent = null;
+            break;
+        case "group_end":
+            meta.status = "completed";
+            meta.currentAgent = null;
+            removeIterationEntry(store, groupId);
+            break;
+        case "status_update": {
+            const activity = parseActivityFromPayload(payload);
+            meta.lastMessage = activity.message || meta.lastMessage;
+
+            if (activity.completed) {
+                meta.status = "completed";
+                meta.lastAgent = activity.name || meta.lastAgent;
+                meta.currentAgent = null;
+                removeIterationEntry(store, groupId);
+            } else if (activity.waiting) {
+                meta.currentAgent = activity.message || activity.name || meta.currentAgent;
+                meta.status = "running";
+            } else if (activity.isActive && activity.name) {
+                meta.currentAgent = activity.name;
+                meta.status = "running";
+            } else if (activity.name) {
+                meta.lastAgent = activity.name;
+            }
+            break;
+        }
+        case "error":
+            meta.status = "error";
+            meta.currentAgent = null;
+            removeIterationEntry(store, groupId);
+            break;
+        case "cancelled":
+            meta.status = "cancelled";
+            meta.currentAgent = null;
+            removeIterationEntry(store, groupId);
+            break;
+        default:
+            break;
+    }
+}
+
+function finalizeIterationState(runId, runStatus) {
+    const store = state.iterations[runId];
+    if (!store) return;
+
+    const status = (runStatus || "").toLowerCase();
+    const terminal =
+        status === "error" ? "error" : status === "cancelled" ? "cancelled" : "completed";
+
+    store.order = [];
+    store.map = {};
+    store.terminalStatus = terminal;
+}
+
+function parseActivityFromPayload(payload) {
+    const message = (payload.content || "").trim();
+    const title = payload.title || "";
+    const itemId = payload.item_id || "";
+
+    let candidate = title || itemId;
+    if (!candidate && message) {
+        candidate = message.includes(":") ? message.split(":")[0] : message;
+    }
+
+    const formattedName = formatAgentName(candidate);
+    const lowerMessage = message.toLowerCase();
+    const waiting = lowerMessage.includes("waiting");
+    const completed = lowerMessage.includes("completed") || Boolean(payload.is_done);
+    const isActive = !waiting && !completed;
+
+    return {
+        name: formattedName,
+        message: message || candidate || "",
+        waiting,
+        isActive,
+        completed
+    };
+}
+
+function formatAgentName(raw) {
+    if (!raw) return "";
+
+    let text = raw.replace(/^iter[:\-]\d+:/i, "");
+    if (text.includes(":")) {
+        const parts = text.split(":").map((part) => part.trim()).filter(Boolean);
+        if (parts.length > 1) {
+            text = parts.slice(1).join(" ");
+        } else {
+            text = parts[0];
+        }
+    }
+
+    text = text
+        .replace(/\btool\b/gi, "")
+        .replace(/[_-]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    if (!text) return "";
+
+    return text
+        .split(" ")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" ");
+}
+
+function formatGroupTitle(groupId, fallbackTitle) {
+    if (fallbackTitle && fallbackTitle.trim()) {
+        return fallbackTitle;
+    }
+    if (!groupId) {
+        return "Iteration";
+    }
+    if (groupId === "iter-final") {
+        return "Final Summary";
+    }
+    const match = groupId.match(/iter[-:](\d+)/);
+    if (match) {
+        const index = parseInt(match[1], 10);
+        return `Iteration ${index + 1}`;
+    }
+    return formatAgentName(groupId);
+}
+
+function formatStatusLabel(status) {
+    switch ((status || "pending").toLowerCase()) {
+        case "running":
+            return "Running";
+        case "completed":
+            return "Completed";
+        case "error":
+            return "Error";
+        case "cancelled":
+            return "Cancelled";
+        case "cancelling":
+            return "Cancelling";
+        default:
+            return "Pending";
+    }
 }
 
 function handleStopRun() {
