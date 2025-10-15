@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentZ Pipeline Manager</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="app-shell">
+        <header class="app-header">
+            <div class="brand">
+                <div class="brand-icon">⚡️</div>
+                <div>
+                    <h1>AgentZ Control Center</h1>
+                    <p>Manage pipelines, configure inputs, and monitor execution.</p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button id="refresh-runs" class="secondary-btn">Refresh Runs</button>
+                <button id="stop-run" class="danger-btn" disabled>Stop Selected</button>
+            </div>
+        </header>
+
+        <main class="column-layout">
+            <!-- Column 1: Pipeline Input -->
+            <section class="column input-column">
+                <div class="panel">
+                    <h2>1. Configure Input</h2>
+                    <label for="pipeline-select" class="input-label">Choose Pipeline</label>
+                    <select id="pipeline-select" class="input-control">
+                        <option value="">Select a pipeline…</option>
+                    </select>
+                    <div id="pipeline-description" class="pipeline-description"></div>
+                    <div id="form-feedback" class="form-feedback" role="alert"></div>
+
+                    <form id="pipeline-form" class="pipeline-form">
+                        <div id="dynamic-fields"></div>
+                        <button id="submit-run" type="submit" class="primary-btn" disabled>Submit Pipeline</button>
+                    </form>
+                </div>
+                <div class="panel info-panel">
+                    <h3>Tips</h3>
+                    <ul>
+                        <li>Pick a pipeline to see its required inputs.</li>
+                        <li>Submitted runs appear in the middle column.</li>
+                        <li>Select a run to stream live progress on the right.</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- Column 2: Submitted Runs -->
+            <section class="column runs-column">
+                <div class="panel">
+                    <h2>2. Submitted Runs</h2>
+                    <div id="run-list" class="run-list">
+                        <div class="empty-state">
+                            <h3>No runs yet</h3>
+                            <p>Submit a pipeline to see it appear here.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Column 3: Run Visualization -->
+            <section class="column detail-column">
+                <div class="panel detail-panel">
+                    <h2>3. Run Visualization</h2>
+                    <div id="run-detail" class="run-detail">
+                        <div class="empty-state">
+                            <h3>Select a run to inspect</h3>
+                            <p>Live execution logs and final reports will appear here.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

@@ -340,6 +340,25 @@ body {
     opacity: 0.5;
 }
 
+.stop-btn {
+    width: 40px;
+    height: 40px;
+    background: #ef4444;
+    border: none;
+    border-radius: 6px;
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+
+.stop-btn:hover {
+    background: #dc2626;
+}
+
 .input-footer {
     max-width: 800px;
     margin: 10px auto 0;

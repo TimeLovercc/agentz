@@ -15,6 +15,7 @@ const elements = {
     messagesContainer: document.getElementById('messages-container'),
     userInput: document.getElementById('user-input'),
     sendBtn: document.getElementById('send-btn'),
+    stopBtn: document.getElementById('stop-btn'),
     clearBtn: document.getElementById('clear-chat-btn'),
     newChatBtn: document.getElementById('new-chat-btn'),
     statusText: document.getElementById('status-text')
@@ -22,6 +23,7 @@ const elements = {
 
 // Pipeline descriptions
 const pipelineDescriptions = {
+    'vanilla_chat': 'Multi-turn conversational agent (persistent session)',
     'web_searcher': 'Search the web for information and research topics',
     'data_scientist': 'Analyze datasets and build machine learning models',
     'simple': 'General purpose AI assistant for various tasks'
@@ -40,6 +42,9 @@ function setupEventListeners() {
 
     // Send message
     elements.sendBtn.addEventListener('click', handleSendMessage);
+
+    // Stop pipeline execution
+    elements.stopBtn.addEventListener('click', handleStopPipeline);
 
     // Enter key to send (Shift+Enter for new line)
     elements.userInput.addEventListener('keydown', (e) => {
@@ -120,6 +125,7 @@ async function handleSendMessage() {
     // Disable input while processing
     state.isProcessing = true;
     disableChatInput();
+    showStopButton();
     elements.statusText.textContent = 'Processing...';
 
     // Show typing indicator
@@ -167,6 +173,11 @@ async function handleSendMessage() {
                             break;
                         }
 
+                        if (data.cancelled) {
+                            updateMessage(messageId, `Cancelled: ${data.cancelled}`);
+                            break;
+                        }
+
                         if (data.content) {
                             assistantMessage += data.content;
                             updateMessage(messageId, assistantMessage);
@@ -187,8 +198,35 @@ async function handleSendMessage() {
         showError('Error: ' + error.message);
     } finally {
         state.isProcessing = false;
+        hideStopButton();
         enableChatInput();
         elements.statusText.textContent = 'Ready';
+    }
+}
+
+// Handle stop pipeline
+async function handleStopPipeline() {
+    if (!state.isProcessing) {
+        return;
+    }
+
+    elements.statusText.textContent = 'Stopping...';
+
+    try {
+        const response = await fetch('/api/stop', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            elements.statusText.textContent = 'Stopped';
+        } else {
+            showError(data.error || 'Failed to stop pipeline');
+        }
+    } catch (error) {
+        showError('Network error: ' + error.message);
     }
 }
 
@@ -295,6 +333,18 @@ function enableChatInput() {
 function disableChatInput() {
     elements.userInput.disabled = true;
     elements.sendBtn.disabled = true;
+}
+
+// Show stop button
+function showStopButton() {
+    elements.sendBtn.style.display = 'none';
+    elements.stopBtn.style.display = 'flex';
+}
+
+// Hide stop button
+function hideStopButton() {
+    elements.stopBtn.style.display = 'none';
+    elements.sendBtn.style.display = 'flex';
 }
 
 // Auto-resize textarea

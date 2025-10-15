@@ -1,0 +1,20 @@
+# Vanilla Chat Pipeline Configuration - Simple conversational agent
+
+# Provider configuration
+provider: "gemini"
+model: "gemini-2.5-flash"
+api_key: "${GEMINI_API_KEY}"
+
+# Default prompt
+data:
+  prompt: |
+    Hello! How are you?
+
+# Pipeline settings
+pipeline:
+  verbose: true
+
+# Agent profiles
+agents:
+  vanilla_chat_agent:
+    profile: vanilla_chat
