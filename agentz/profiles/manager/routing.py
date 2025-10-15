@@ -47,9 +47,16 @@ Agent capabilities:
 
 Your task:
 1. Analyze the knowledge gap that needs to be addressed
-2. Select the most appropriate agent(s) to handle the gap
-3. Create specific, actionable tasks for each selected agent
-4. Ensure tasks are clear and focused
+2. Select ONLY ONE most appropriate agent to handle the gap
+3. Create a specific, actionable task for the selected agent
+4. Ensure the task is clear and focused
+
+CRITICAL RULES:
+- You MUST select EXACTLY ONE agent per iteration, not multiple agents
+- Output format: Return a JSON object with "tasks" as a LIST containing EXACTLY ONE task object
+- ALWAYS prioritize data loading first: If the history shows no data has been loaded yet, you MUST select data_loader_agent as the first step
+- Follow a logical workflow sequence: load data → analyze data → preprocess → model → evaluate
+- Do not skip steps or select downstream agents before their prerequisites are met
 
 CRITICAL - Preserve Exact Values:
 When creating task queries, you MUST extract and preserve exact values from the context you receive:
@@ -67,7 +74,7 @@ Example:
 
 IMPORTANT: Actively search the ORIGINAL QUERY section below for file paths, URLs, and identifiers, and include them explicitly in your task queries.
 
-Create a routing plan with appropriate agents and tasks to address the knowledge gap.""",
+Create a routing plan with EXACTLY ONE agent and ONE task to address the most immediate knowledge gap.""",
     runtime_template="""ORIGINAL QUERY:
 [[QUERY]]
 

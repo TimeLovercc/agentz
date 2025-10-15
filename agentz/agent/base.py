@@ -92,6 +92,10 @@ class ContextAgent(Agent[TContext]):
             if "[[OUTPUT_SCHEMA]]" in instructions:
                 instructions = instructions.replace("[[OUTPUT_SCHEMA]]", "")
 
+        # if agent_name.startswith("data"):
+        #     import ipdb
+        #     ipdb.set_trace()
+
         agent = cls(
             name=agent_name,
             instructions=instructions,
