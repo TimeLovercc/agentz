@@ -1,15 +1,8 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
-
 from agentz.profiles.base import Profile, ToolAgentOutput
 
 from agents import WebSearchTool
-
-
-class TaskInput(BaseModel):
-    """Input schema for task-based runtime template."""
-    task: str = Field(description="The task to perform")
 
 
 # Profile instance for web searcher agent
@@ -35,9 +28,8 @@ GUIDELINES:
 
 Only output JSON. Follow the JSON schema below. Do not output anything else. I will be parsing this with Pydantic so output valid JSON only:
 {ToolAgentOutput.model_json_schema()}""",
-    runtime_template="[[TASK]]",
+    runtime_template="{task}",
     output_schema=ToolAgentOutput,
-    input_schema=TaskInput,
     tools=[WebSearchTool()],
     model=None
 )

@@ -1,15 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
-
 from agentz.profiles.base import Profile
-
-
-class ObserveInput(BaseModel):
-    """Input schema for observe agent runtime template."""
-    iteration: int = Field(description="Current iteration number")
-    query: str = Field(description="Original user query")
-    history: str = Field(description="History of actions, findings and thoughts")
 
 
 # Profile instance for observe agent
@@ -34,15 +25,14 @@ Provide concise but insightful observations that help guide the research process
 - What patterns are emerging
 - What areas need deeper investigation
 - Strategic recommendations for next steps""",
-    runtime_template="""You are starting iteration [[ITERATION]] of your research process.
+    runtime_template="""You are starting iteration {iteration} of your research process.
 
 ORIGINAL QUERY:
-[[QUERY]]
+{query}
 
 HISTORY OF ACTIONS, FINDINGS AND THOUGHTS:
-[[HISTORY]]""",
+{history}""",
     output_schema=None,
-    input_schema=ObserveInput,
     tools=None,
     model=None
 )

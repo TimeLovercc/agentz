@@ -3,13 +3,20 @@ from __future__ import annotations
 from typing import Any
 
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agentz.agent.base import ContextAgent
 from agentz.context.context import Context
 from agentz.profiles.base import ToolAgentOutput
-from agentz.profiles.manager.routing import AgentSelectionPlan, AgentTask, RoutingInput
+from agentz.profiles.manager.routing import AgentSelectionPlan, AgentTask
 from pipelines.base import BasePipeline
+
+
+class RoutingInput(BaseModel):
+    """Input schema for routing agent."""
+    query: str = Field(description="Original user query")
+    gap: str = Field(description="Knowledge gap to address")
+    history: str = Field(description="History of actions, findings and thoughts")
 
 
 class SimpleQuery(BaseModel):
@@ -63,11 +70,8 @@ class SimplePipeline(BasePipeline):
             routing_plan = await self.routing_agent(routing_input, group_id=group_id)
             task = self._select_task(routing_plan)
 
-            tool_payload = (
-                self.tool_agent.input_model(task=task.query)
-                if self.tool_agent.input_model
-                else task.query
-            )
+            # Just pass the task query string directly - agent will handle it
+            tool_payload = task.query
 
             result = await self.tool_agent(tool_payload, group_id=group_id)
 

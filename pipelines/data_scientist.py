@@ -1,12 +1,20 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agentz.agent.base import ContextAgent
 from agentz.context.context import Context
 from pipelines.base import BasePipeline
+
+
+class WriterInput(BaseModel):
+    """Input schema for writer agent."""
+    user_prompt: str = Field(description="Original user query/prompt")
+    data_path: str = Field(description="Path to the dataset")
+    findings: str = Field(description="Research findings to synthesize")
+    guidelines_block: Optional[str] = Field(default="", description="Optional formatting guidelines")
 
 
 class DataScienceQuery(BaseModel):
@@ -103,8 +111,6 @@ class DataScientistPipeline(BasePipeline):
         self.update_printer("research", "Research workflow complete", is_done=True)
 
         # Prepare WriterInput with all required fields
-        from agentz.profiles.manager.writer import WriterInput
-
         # Extract user_prompt and data_path from original query or config
         if isinstance(self._original_query, DataScienceQuery):
             user_prompt = self._original_query.prompt

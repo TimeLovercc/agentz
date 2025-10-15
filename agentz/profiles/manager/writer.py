@@ -1,17 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
-from pydantic import BaseModel, Field
-
 from agentz.profiles.base import Profile
-
-
-class WriterInput(BaseModel):
-    """Input schema for writer agent runtime template."""
-    user_prompt: str = Field(description="Original user query/prompt")
-    data_path: str = Field(description="Path to the dataset")
-    findings: str = Field(description="Research findings to synthesize")
-    guidelines_block: Optional[str] = Field(default="", description="Optional formatting guidelines")
 
 
 # Profile instance for writer agent
@@ -36,16 +25,15 @@ Report Structure Guidelines:
 - Ensure technical accuracy while maintaining readability
 
 Focus on creating professional, comprehensive reports that effectively communicate the research findings and their practical implications.""",
-    runtime_template="""Provide a response based on the query and findings below with as much detail as possible[[GUIDELINES_BLOCK]]
+    runtime_template="""Provide a response based on the query and findings below with as much detail as possible{guidelines_block}
 
-QUERY: [[USER_PROMPT]]
+QUERY: {user_prompt}
 
-DATASET: [[DATA_PATH]]
+DATASET: {data_path}
 
 FINDINGS:
-[[FINDINGS]]""",
+{findings}""",
     output_schema=None,
-    input_schema=WriterInput,
     tools=None,
     model=None
 )

@@ -5,14 +5,6 @@ from pydantic import BaseModel, Field
 from agentz.profiles.base import Profile
 
 
-class MemoryInput(BaseModel):
-    """Input schema for memory agent runtime template."""
-    iteration: int = Field(description="Current iteration number")
-    query: str = Field(description="Original user query")
-    last_summary: str = Field(description="Last generated summary")
-    conversation_history: str = Field(description="Recent conversation history")
-
-
 class MemoryAgentOutput(BaseModel):
     """Output schema for memory agent."""
     summary: str = Field(description="Summary of the conversation history", default="")
@@ -45,18 +37,17 @@ Task Guidelines
   - Do NOT output or mention any information that is uncertain, insufficient, or cannot be confirmed.
 
 Strictly avoid fabricating, inferring, or exaggerating any information not present in the conversation. Only output information that is certain and explicitly stated.""",
-    runtime_template="""You are at the end of iteration [[ITERATION]]. You need to generate a comprehensive and useful summary.
+    runtime_template="""You are at the end of iteration {iteration}. You need to generate a comprehensive and useful summary.
 
 ORIGINAL QUERY:
-[[QUERY]]
+{query}
 
 LAST SUMMARY:
-[[LAST_SUMMARY]]
+{last_summary}
 
 CONVERSATION HISTORY:
-[[CONVERSATION_HISTORY]]""",
+{conversation_history}""",
     output_schema=MemoryAgentOutput,
-    input_schema=MemoryInput,
     tools=None,
     model=None
 )

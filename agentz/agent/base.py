@@ -19,7 +19,6 @@ class ContextAgent(Agent[TContext]):
     def __init__(
         self,
         *args: Any,
-        input_model: type[BaseModel] | None = None,
         output_model: type[BaseModel] | None = None,
         prompt_builder: PromptBuilder | None = None,
         default_span_type: str = "agent",
@@ -34,7 +33,6 @@ class ContextAgent(Agent[TContext]):
 
         super().__init__(*args, **kwargs)
 
-        self.input_model = input_model
         self.output_model = self._coerce_output_model(output_model or getattr(self, "output_type", None))
         self.prompt_builder = prompt_builder
         self.default_span_type = default_span_type
@@ -89,7 +87,6 @@ class ContextAgent(Agent[TContext]):
             name=agent_name,
             instructions=instructions,
             output_model=output_model,
-            input_model=getattr(profile, "input_schema", None),
             tools=tools,
             model=llm,
             output_parser=output_parser,
@@ -108,23 +105,6 @@ class ContextAgent(Agent[TContext]):
             return candidate
         return None
 
-    def _coerce_input(self, payload: Any, strict: bool = True) -> Any:
-        if self.input_model is None or payload is None:
-            return payload
-        if isinstance(payload, self.input_model):
-            return payload
-        if isinstance(payload, BaseModel):
-            return self.input_model.model_validate(payload.model_dump())
-        if isinstance(payload, dict):
-            return self.input_model.model_validate(payload)
-
-        # If strict mode is disabled, allow passthrough
-        if not strict:
-            return payload
-
-        msg = f"{self.name} expects input compatible with {self.input_model.__name__}"
-        raise TypeError(msg)
-
     @staticmethod
     def _to_prompt_payload(payload: Any) -> dict[str, Any]:
         if payload is None:
@@ -142,7 +122,7 @@ class ContextAgent(Agent[TContext]):
         context: Any = None,
         template: Optional[str] = None,
     ) -> str:
-        validated = self._coerce_input(payload)
+        validated = payload  # No validation needed
 
         if self.prompt_builder:
             return self.prompt_builder(validated, context, self)
@@ -210,65 +190,59 @@ class ContextAgent(Agent[TContext]):
             # Build context dict with values from state for template rendering
             context_dict = {}
 
-            # ITERATION: current iteration number
+            # iteration: current iteration number
             try:
-                context_dict['ITERATION'] = str(self._pipeline.iteration)
+                context_dict['iteration'] = str(self._pipeline.iteration)
             except Exception:
                 try:
-                    context_dict['ITERATION'] = str(state.current_iteration.index)
+                    context_dict['iteration'] = str(state.current_iteration.index)
                 except Exception:
-                    context_dict['ITERATION'] = '1'
+                    context_dict['iteration'] = '1'
 
-            # QUERY: original query
+            # query: original query
             if state.query:
-                context_dict['QUERY'] = state.query
+                context_dict['query'] = state.query
             else:
-                context_dict['QUERY'] = ''
+                context_dict['query'] = ''
 
-            # HISTORY: previous iteration history
+            # history: previous iteration history
             try:
                 history = state.iteration_history(include_current=False)
-                context_dict['HISTORY'] = history if history else 'No previous iterations.'
+                context_dict['history'] = history if history else 'No previous iterations.'
             except Exception:
-                context_dict['HISTORY'] = 'No previous iterations.'
+                context_dict['history'] = 'No previous iterations.'
 
-            # OBSERVATION: current iteration observation (if available)
+            # observation: current iteration observation (if available)
             try:
                 observation = state.current_iteration.observation
                 if observation:
-                    context_dict['OBSERVATION'] = observation
+                    context_dict['observation'] = observation
                 else:
-                    context_dict['OBSERVATION'] = ''
+                    context_dict['observation'] = ''
             except Exception:
-                context_dict['OBSERVATION'] = ''
+                context_dict['observation'] = ''
 
-            # INPUT / TASK / GAP: current payload (use same value for all these aliases)
+            # input / task / gap: current payload (use same value for all these aliases)
             if current_input:
-                context_dict['INPUT'] = current_input
-                context_dict['TASK'] = current_input
-                context_dict['GAP'] = current_input
+                context_dict['input'] = current_input
+                context_dict['task'] = current_input
+                context_dict['gap'] = current_input
             else:
-                context_dict['INPUT'] = ''
-                context_dict['TASK'] = ''
-                context_dict['GAP'] = ''
+                context_dict['input'] = ''
+                context_dict['task'] = ''
+                context_dict['gap'] = ''
 
-            # Extract input_schema fields from payload if available
-            # This allows runtime_template placeholders like [[USER_PROMPT]], [[DATA_PATH]] to be filled
-            if self.input_model and payload is not None:
+            # Extract fields from any BaseModel payload
+            if payload is not None and isinstance(payload, BaseModel):
                 try:
-                    # Try to coerce payload to input_model
-                    validated_payload = self._coerce_input(payload, strict=False)
-
-                    # If coercion succeeded and result is a BaseModel, extract fields
-                    if isinstance(validated_payload, BaseModel):
-                        payload_dict = validated_payload.model_dump()
-                        # Add all fields from input_model to context_dict with uppercased keys
-                        for field_name, field_value in payload_dict.items():
-                            uppercased_key = field_name.upper()
-                            # Convert value to string for template rendering
-                            context_dict[uppercased_key] = str(field_value) if field_value is not None else ''
+                    payload_dict = payload.model_dump()
+                    # Add all fields to context_dict with lowercase keys
+                    for field_name, field_value in payload_dict.items():
+                        lowercased_key = field_name.lower()
+                        # Convert value to string for template rendering
+                        context_dict[lowercased_key] = str(field_value) if field_value is not None else ''
                 except Exception:
-                    # If coercion fails, silently skip - context_dict already has standard keys
+                    # If extraction fails, silently skip - context_dict already has standard keys
                     pass
 
             # Render the runtime_template with context values
@@ -331,6 +305,8 @@ class ContextAgent(Agent[TContext]):
         # Build instructions with automatic context injection if enabled
         if self.auto_inject_context and self._pipeline is not None and hasattr(self._pipeline, 'context'):
             instructions = self.build_contextual_instructions(payload)
+            import ipdb
+            ipdb.set_trace()
         else:
             # Build prompt with non-strict input coercion
             # This allows string inputs to pass through without validation errors

@@ -44,11 +44,16 @@ def test_web_searcher_profile():
     profiles = load_all_profiles()
     web_searcher = profiles["web_searcher"]
 
-    # Validate the input schema round-trip
-    task_input = web_searcher.input_schema(task="Find recent breakthroughs in reinforcement learning.")
+    # Create a simple task input
+    from pydantic import BaseModel, Field
+    
+    class TaskInput(BaseModel):
+        task: str = Field(description="The task to perform")
+    
+    task_input = TaskInput(task="Find recent breakthroughs in reinforcement learning.")
 
-    # Render runtime template with sample data
-    runtime_payload = web_searcher.render(TASK=task_input.task)
+    # Render runtime template with sample data (lowercase keys)
+    runtime_payload = web_searcher.render(task=task_input.task)
 
     # Expand the output schema placeholder for human inspection
     instructions = web_searcher.instructions

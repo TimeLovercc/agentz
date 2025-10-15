@@ -20,13 +20,6 @@ class AgentSelectionPlan(BaseModel):
     reasoning: str = Field(description="Reasoning for the agent selection", default="")
 
 
-class RoutingInput(BaseModel):
-    """Input schema for routing agent runtime template."""
-    query: str = Field(description="Original user query")
-    gap: str = Field(description="Knowledge gap to address")
-    history: str = Field(description="History of actions, findings and thoughts")
-
-
 # Profile instance for routing agent
 routing_profile = Profile(
     instructions="""You are a task routing agent. Your role is to analyze knowledge gaps and route appropriate tasks to specialized agents.
@@ -76,16 +69,15 @@ IMPORTANT: Actively search the ORIGINAL QUERY section below for file paths, URLs
 
 Create a routing plan with EXACTLY ONE agent and ONE task to address the most immediate knowledge gap.""",
     runtime_template="""ORIGINAL QUERY:
-[[QUERY]]
+{query}
 
 KNOWLEDGE GAP TO ADDRESS:
-[[GAP]]
+{gap}
 
 
 HISTORY OF ACTIONS, FINDINGS AND THOUGHTS:
-[[HISTORY]]""",
+{history}""",
     output_schema=AgentSelectionPlan,
-    input_schema=RoutingInput,
     tools=None,
     model=None
 )

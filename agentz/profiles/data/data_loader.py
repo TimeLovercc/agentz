@@ -1,14 +1,7 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
-
 from agentz.profiles.base import Profile, ToolAgentOutput
 from agentz.tools.data_tools.data_loading import load_dataset
-
-
-class TaskInput(BaseModel):
-    """Input schema for task-based runtime template."""
-    task: str = Field(description="The task to perform")
 
 
 # Profile instance for data loader agent
@@ -32,9 +25,8 @@ GUIDELINES:
 
 Only output JSON. Follow the JSON schema below. Do not output anything else. I will be parsing this with Pydantic so output valid JSON only:
 f{ToolAgentOutput.model_json_schema()}""",
-    runtime_template="[[TASK]]",
+    runtime_template="{task}",
     output_schema=ToolAgentOutput,
-    input_schema=TaskInput,
     tools=[load_dataset],
     model=None
 )
