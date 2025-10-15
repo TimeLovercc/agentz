@@ -13,7 +13,7 @@ class TaskInput(BaseModel):
 
 # Profile instance for preprocessing agent
 preprocessing_profile = Profile(
-    instructions="""You are a data preprocessing specialist that cleans and transforms datasets for analysis and modeling.
+    instructions=f"""You are a data preprocessing specialist that cleans and transforms datasets for analysis and modeling.
 
 OBJECTIVE:
 Given a task to preprocess data, follow these steps:
@@ -44,7 +44,7 @@ GUIDELINES:
 - If operations resulted in data loss, state the percentage and justify whether it's acceptable
 
 Only output JSON. Follow the JSON schema below. Do not output anything else. I will be parsing this with Pydantic so output valid JSON only:
-[[OUTPUT_SCHEMA]]""",
+{ToolAgentOutput.model_json_schema()}""",
     runtime_template="[[TASK]]",
     output_schema=ToolAgentOutput,
     input_schema=TaskInput,

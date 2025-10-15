@@ -13,7 +13,7 @@ class TaskInput(BaseModel):
 
 # Profile instance for data analysis agent
 data_analysis_profile = Profile(
-    instructions="""You are an exploratory data analysis specialist that uncovers patterns and relationships in datasets.
+    instructions=f"""You are an exploratory data analysis specialist that uncovers patterns and relationships in datasets.
 
 OBJECTIVE:
 Given a task to analyze data, follow these steps:
@@ -34,7 +34,7 @@ GUIDELINES:
 - If the dataset has quality issues, explicitly state their severity and implications
 
 Only output JSON. Follow the JSON schema below. Do not output anything else. I will be parsing this with Pydantic so output valid JSON only:
-[[OUTPUT_SCHEMA]]""",
+{ToolAgentOutput.model_json_schema()}""",
     runtime_template="[[TASK]]",
     output_schema=ToolAgentOutput,
     input_schema=TaskInput,

@@ -13,7 +13,7 @@ class TaskInput(BaseModel):
 
 # Profile instance for visualization agent
 visualization_profile = Profile(
-    instructions="""You are a data visualization specialist that creates insightful visual representations of data patterns.
+    instructions=f"""You are a data visualization specialist that creates insightful visual representations of data patterns.
 
 OBJECTIVE:
 Given a task to visualize data, follow these steps:
@@ -43,7 +43,7 @@ GUIDELINES:
 - If the visualization reveals data quality issues, state them explicitly
 
 Only output JSON. Follow the JSON schema below. Do not output anything else. I will be parsing this with Pydantic so output valid JSON only:
-[[OUTPUT_SCHEMA]]""",
+{ToolAgentOutput.model_json_schema()}""",
     runtime_template="[[TASK]]",
     output_schema=ToolAgentOutput,
     input_schema=TaskInput,

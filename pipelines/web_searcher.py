@@ -49,11 +49,6 @@ class WebSearcherPipeline(BasePipeline):
         # Create tool agents as dictionary - automatically bound to pipeline
         tool_agents = [
             "web_searcher",
-            # "data_analysis",
-            # "preprocessing",
-            # "model_training",
-            # "evaluation",
-            # "visualization",
         ]
         self.tool_agents = {
             f"{name}": ContextAgent.from_profile(self, name, llm)

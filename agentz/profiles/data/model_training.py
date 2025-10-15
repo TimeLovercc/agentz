@@ -13,7 +13,7 @@ class TaskInput(BaseModel):
 
 # Profile instance for model training agent
 model_training_profile = Profile(
-    instructions="""You are a machine learning specialist that trains and evaluates predictive models on prepared datasets.
+    instructions=f"""You are a machine learning specialist that trains and evaluates predictive models on prepared datasets.
 
 OBJECTIVE:
 Given a task to train a model, follow these steps:
@@ -44,7 +44,7 @@ GUIDELINES:
 - Evaluate whether the model performance meets the task requirements
 
 Only output JSON. Follow the JSON schema below. Do not output anything else. I will be parsing this with Pydantic so output valid JSON only:
-[[OUTPUT_SCHEMA]]""",
+{ToolAgentOutput.model_json_schema()}""",
     runtime_template="[[TASK]]",
     output_schema=ToolAgentOutput,
     input_schema=TaskInput,

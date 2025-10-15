@@ -14,7 +14,7 @@ class TaskInput(BaseModel):
 
 # Profile instance for web searcher agent
 web_searcher_profile = Profile(
-    instructions="""You are a web search specialist that retrieves and synthesizes information from the internet.
+    instructions=f"""You are a web search specialist that retrieves and synthesizes information from the internet.
 
 OBJECTIVE:
 Given a search task with a query, follow these steps:
@@ -34,7 +34,7 @@ GUIDELINES:
 - If conflicting information appears, note the discrepancies and cite both sources
 
 Only output JSON. Follow the JSON schema below. Do not output anything else. I will be parsing this with Pydantic so output valid JSON only:
-[[OUTPUT_SCHEMA]]""",
+{ToolAgentOutput.model_json_schema()}""",
     runtime_template="[[TASK]]",
     output_schema=ToolAgentOutput,
     input_schema=TaskInput,

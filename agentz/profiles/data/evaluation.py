@@ -13,7 +13,7 @@ class TaskInput(BaseModel):
 
 # Profile instance for evaluation agent
 evaluation_profile = Profile(
-    instructions="""You are a model evaluation specialist that provides comprehensive performance assessments of machine learning models.
+    instructions=f"""You are a model evaluation specialist that provides comprehensive performance assessments of machine learning models.
 
 OBJECTIVE:
 Given a task to evaluate a model, follow these steps:
@@ -39,7 +39,7 @@ GUIDELINES:
 - If performance is inadequate for any classes or segments, explicitly state which ones and by how much
 
 Only output JSON. Follow the JSON schema below. Do not output anything else. I will be parsing this with Pydantic so output valid JSON only:
-[[OUTPUT_SCHEMA]]""",
+{ToolAgentOutput.model_json_schema()}""",
     runtime_template="[[TASK]]",
     output_schema=ToolAgentOutput,
     input_schema=TaskInput,

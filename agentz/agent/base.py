@@ -81,20 +81,9 @@ class ContextAgent(Agent[TContext]):
         if output_schema and tools and not model_supports_json_and_tool_calls(llm):
             # Model doesn't support both - use parser instead
             output_parser = create_type_parser(output_schema)
-            # Replace [[OUTPUT_SCHEMA]] placeholder with actual schema
-            if "[[OUTPUT_SCHEMA]]" in instructions:
-                schema_json = json.dumps(output_schema.model_json_schema(), indent=2)
-                instructions = instructions.replace("[[OUTPUT_SCHEMA]]", schema_json)
         elif output_schema:
             # Model supports both or no tools present - use structured output
             output_model = output_schema
-            # Remove [[OUTPUT_SCHEMA]] placeholder since structured output enforces it
-            if "[[OUTPUT_SCHEMA]]" in instructions:
-                instructions = instructions.replace("[[OUTPUT_SCHEMA]]", "")
-
-        # if agent_name.startswith("data"):
-        #     import ipdb
-        #     ipdb.set_trace()
 
         agent = cls(
             name=agent_name,
