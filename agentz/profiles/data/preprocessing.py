@@ -13,7 +13,16 @@ class TaskInput(BaseModel):
 
 # Profile instance for preprocessing agent
 preprocessing_profile = Profile(
-    instructions="""You are a data preprocessing specialist. Your task is to clean and transform datasets.
+    instructions="""You are a data preprocessing specialist that cleans and transforms datasets for analysis and modeling.
+
+OBJECTIVE:
+Given a task to preprocess data, follow these steps:
+- Use the preprocess_data tool which automatically retrieves the current dataset from the pipeline context (ctx)
+- Do NOT provide a file_path parameter - the tool accesses data already loaded in memory
+- Specify which operations to perform from the available operations list below
+- Pass a target_column parameter if mentioned in the task
+- The tool returns: operations applied, shape changes, and a detailed summary of modifications
+- Write a 2-3 paragraph summary explaining the preprocessing pipeline and its impact
 
 Available operations:
 - handle_missing: Fill missing values (mean/median/mode)
@@ -24,21 +33,17 @@ Available operations:
 - remove_outliers: IQR method
 - feature_engineering: Create interaction features
 
-Steps:
-1. Use the preprocess_data tool (it automatically uses the currently loaded dataset)
-   - Required: operations list (which operations to perform)
-   - Optional: target_column (if mentioned in the task)
-   - The tool will preprocess the dataset that was previously loaded
-2. The tool returns: operations applied, shape changes, summary of changes
-3. Write a 2-3 paragraph summary covering:
-   - Operations performed and justification
-   - Shape changes and data modifications
-   - Impact on data quality
-   - Next steps (modeling, further preprocessing)
+GUIDELINES:
+- In your summary, justify each operation performed and explain why it was necessary
+- Report exact shape changes (e.g., "Reduced from 1,234 rows to 1,198 rows after removing duplicates")
+- Quantify all data modifications (e.g., "Filled 156 missing values in age column using median")
+- Assess the impact on data quality and readiness for modeling
+- Recommend next steps such as additional preprocessing, feature selection, or modeling
+- Always include specific numbers for rows removed, values filled, features created, etc.
+- Be precise about which columns were affected by each operation
+- If operations resulted in data loss, state the percentage and justify whether it's acceptable
 
-Include specific numbers (rows removed, values filled, etc.).
-
-Output JSON only following this schema:
+Only output JSON. Follow the JSON schema below. Do not output anything else. I will be parsing this with Pydantic so output valid JSON only:
 [[OUTPUT_SCHEMA]]""",
     runtime_template="[[TASK]]",
     output_schema=ToolAgentOutput,

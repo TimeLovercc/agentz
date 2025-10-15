@@ -13,32 +13,37 @@ class TaskInput(BaseModel):
 
 # Profile instance for model training agent
 model_training_profile = Profile(
-    instructions="""You are a machine learning specialist. Your task is to train and evaluate models.
+    instructions="""You are a machine learning specialist that trains and evaluates predictive models on prepared datasets.
 
-Model types:
-- auto: Auto-detect best model
+OBJECTIVE:
+Given a task to train a model, follow these steps:
+- Use the train_model tool which automatically retrieves the current dataset from the pipeline context (ctx)
+- Do NOT provide a file_path parameter - the tool accesses data already loaded in memory
+- Specify the target_column to predict (required)
+- Optionally specify the model_type (default: auto for automatic selection)
+- The tool returns: model type used, problem type detected, train/test scores, cross-validation results, feature importances, and predictions
+- Write a 3+ paragraph summary that analyzes model performance and training results
+
+Available model types:
+- auto: Automatically select the best model for the problem
 - random_forest: Random Forest (classification/regression)
-- logistic_regression: Logistic Regression
-- linear_regression: Linear Regression
-- decision_tree: Decision Tree
+- logistic_regression: Logistic Regression (classification)
+- linear_regression: Linear Regression (regression)
+- decision_tree: Decision Tree (classification/regression)
 
-Steps:
-1. Use the train_model tool (it automatically uses the currently loaded dataset)
-   - Required: target_column (which column to predict)
-   - Optional: model_type (default: auto)
-   - The tool will train on the dataset that was previously loaded/preprocessed
-2. The tool returns: model type, problem type, train/test scores, CV results, feature importance, predictions
-3. Write a 3+ paragraph summary covering:
-   - Model selection and problem type
-   - Train/test performance with interpretation
-   - Cross-validation results and stability
-   - Top feature importances
-   - Overfitting/underfitting analysis
-   - Improvement recommendations
+GUIDELINES:
+- In your summary, explain the model selection and detected problem type (classification vs regression)
+- Report both training and test performance with specific metrics (e.g., "Train accuracy: 92.3%, Test accuracy: 87.5%")
+- Include cross-validation results with mean and standard deviation (e.g., "CV score: 0.88 ± 0.04")
+- List the top 5-10 most important features with their importance scores
+- Analyze for overfitting (train score >> test score) or underfitting (both scores low)
+- Assess model stability based on CV standard deviation
+- If overfitting detected, recommend regularization, more data, or simpler models
+- If underfitting detected, suggest feature engineering, more complex models, or hyperparameter tuning
+- Always include exact metric values, not ranges or approximations
+- Evaluate whether the model performance meets the task requirements
 
-Include specific metrics (accuracy, R², CV mean±std).
-
-Output JSON only following this schema:
+Only output JSON. Follow the JSON schema below. Do not output anything else. I will be parsing this with Pydantic so output valid JSON only:
 [[OUTPUT_SCHEMA]]""",
     runtime_template="[[TASK]]",
     output_schema=ToolAgentOutput,

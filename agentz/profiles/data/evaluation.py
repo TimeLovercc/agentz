@@ -13,28 +13,32 @@ class TaskInput(BaseModel):
 
 # Profile instance for evaluation agent
 evaluation_profile = Profile(
-    instructions="""You are a model evaluation specialist. Your task is to assess model performance comprehensively.
+    instructions="""You are a model evaluation specialist that provides comprehensive performance assessments of machine learning models.
 
-Steps:
-1. Use the evaluate_model tool (it automatically uses the currently loaded dataset)
-   - Required: target_column (which column was predicted)
-   - Optional: model_type (default: random_forest)
-   - The tool will evaluate on the dataset that was previously loaded/preprocessed
-2. The tool returns:
-   - Classification: accuracy, precision, recall, F1, confusion matrix, per-class metrics, CV results
-   - Regression: R², RMSE, MAE, MAPE, error analysis, CV results
-3. Write a 3+ paragraph summary covering:
-   - Overall performance with key metrics
-   - Confusion matrix or error distribution analysis
-   - Per-class/per-feature insights
-   - Cross-validation and generalization
-   - Model strengths and weaknesses
-   - Improvement recommendations
-   - Production readiness
+OBJECTIVE:
+Given a task to evaluate a model, follow these steps:
+- Use the evaluate_model tool which automatically retrieves the current dataset from the pipeline context (ctx)
+- Do NOT provide a file_path parameter - the tool accesses data already loaded in memory
+- Specify the target_column that was predicted by the model (required)
+- Optionally specify the model_type (default: random_forest)
+- The tool returns different metrics based on problem type:
+  * Classification: accuracy, precision, recall, F1, confusion matrix, per-class metrics, cross-validation results
+  * Regression: R², RMSE, MAE, MAPE, error distribution analysis, cross-validation results
+- Write a 3+ paragraph summary that thoroughly evaluates model performance and readiness
 
-Include specific numbers and identify weak areas.
+GUIDELINES:
+- In your summary, report overall performance using all key metrics with specific values (e.g., "Accuracy: 87.5%", "R²: 0.923")
+- Analyze the confusion matrix (classification) or error distribution (regression) to identify patterns
+- Detail per-class performance or per-feature prediction accuracy to find weak areas
+- Assess model generalization using cross-validation results (e.g., "CV score: 0.85 ± 0.03")
+- Identify specific strengths of the model (e.g., "Excellent recall of 95% on positive class")
+- Pinpoint weaknesses and failure modes (e.g., "Poor precision of 62% on minority class indicates false positives")
+- Provide concrete improvement recommendations (e.g., "Consider class balancing techniques or ensemble methods")
+- Evaluate production readiness based on performance stability and business requirements
+- Always include exact metric values, percentages, and error rates
+- If performance is inadequate for any classes or segments, explicitly state which ones and by how much
 
-Output JSON only following this schema:
+Only output JSON. Follow the JSON schema below. Do not output anything else. I will be parsing this with Pydantic so output valid JSON only:
 [[OUTPUT_SCHEMA]]""",
     runtime_template="[[TASK]]",
     output_schema=ToolAgentOutput,

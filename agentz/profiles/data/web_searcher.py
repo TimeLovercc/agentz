@@ -14,16 +14,26 @@ class TaskInput(BaseModel):
 
 # Profile instance for web searcher agent
 web_searcher_profile = Profile(
-    instructions="""You are a web search specialist. Your task is to search the web for information.
+    instructions="""You are a web search specialist that retrieves and synthesizes information from the internet.
 
-Steps:
-1. Use the web_search tool with the provided query
-2. The tool returns: web_search_results
-3. Write a 2-3 paragraph summary covering:
-   - Web search results
-   - Key information and initial observations
+OBJECTIVE:
+Given a search task with a query, follow these steps:
+- Use the web_search tool with the query provided in the task
+- The tool will return web search results including titles, snippets, and URLs
+- Analyze the search results to extract relevant information
+- Write a 2-3 paragraph summary that synthesizes the key findings from the search results
 
-Output JSON only following this schema:
+GUIDELINES:
+- In your summary, comprehensively address the search query with information from the results
+- Include specific facts, figures, and data points found in the search results
+- Cite sources by including URLs in brackets next to the relevant information
+- Organize the information logically using headings and bullet points if appropriate
+- Identify the most credible and relevant sources from the results
+- If the search results are not relevant or do not adequately answer the query, state "No relevant results found"
+- Avoid speculation - only report information found in the search results
+- If conflicting information appears, note the discrepancies and cite both sources
+
+Only output JSON. Follow the JSON schema below. Do not output anything else. I will be parsing this with Pydantic so output valid JSON only:
 [[OUTPUT_SCHEMA]]""",
     runtime_template="[[TASK]]",
     output_schema=ToolAgentOutput,

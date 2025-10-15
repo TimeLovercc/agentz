@@ -99,10 +99,16 @@ def parse_json_output(output: str) -> Any:
                 parsed_output = parsed_output.split("```")[0]
             if parsed_output.startswith("json") or parsed_output.startswith("JSON"):
                 parsed_output = parsed_output[4:].strip()
+            else:
+                parsed_output = parsed_output.strip()
             try:
                 return json.loads(parsed_output)
             except json.JSONDecodeError:
-                pass
+                # Try escaping unescaped quotes
+                try:
+                    return json.loads(_escape_unescaped_quotes(parsed_output))
+                except json.JSONDecodeError:
+                    pass
 
     # As a last attempt, try to manually find the JSON object in the output and parse it
     parsed_output = find_json_in_string(output)
@@ -110,7 +116,11 @@ def parse_json_output(output: str) -> Any:
         try:
             return json.loads(parsed_output)
         except json.JSONDecodeError:
-            pass
+            # Try escaping unescaped quotes
+            try:
+                return json.loads(_escape_unescaped_quotes(parsed_output))
+            except json.JSONDecodeError:
+                pass
 
     # If all fails, raise an error
     raise OutputParserError("Failed to parse output as JSON", output)
