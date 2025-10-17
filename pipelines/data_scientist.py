@@ -70,17 +70,6 @@ class DataScientistPipeline(BasePipeline):
             for name in tool_agents
         }
 
-        # Store original query for writer agent
-        self._original_query = None
-
-    async def initialize_pipeline(self, query: Any) -> None:
-        """Store original query and initialize pipeline state."""
-        # Store the original query object for later use (e.g., in writer agent)
-        self._original_query = query
-
-        # Call parent implementation
-        await super().initialize_pipeline(query)
-
     async def execute(self) -> Any:
         """Execute data science workflow - full implementation in one function."""
         self.update_printer("research", "Executing research workflow...")
@@ -90,6 +79,7 @@ class DataScientistPipeline(BasePipeline):
             # Begin iteration with its group
             _, group_id = self.begin_iteration()
 
+            # Get pre-formatted query from state
             query = self.context.state.query
 
             # Observe → Evaluate → Route → Tools
@@ -112,9 +102,9 @@ class DataScientistPipeline(BasePipeline):
 
         # Prepare WriterInput with all required fields
         # Extract user_prompt and data_path from original query or config
-        if isinstance(self._original_query, DataScienceQuery):
-            user_prompt = self._original_query.prompt
-            data_path = self._original_query.data_path
+        if isinstance(self.context.state.query, DataScienceQuery):
+            user_prompt = self.context.state.query.prompt
+            data_path = self.context.state.query.data_path
         else:
             # Fall back to config values if query is not DataScienceQuery
             user_prompt = self.config.data.get('prompt', 'No prompt provided')

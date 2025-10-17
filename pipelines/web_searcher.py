@@ -64,7 +64,8 @@ class WebSearcherPipeline(BasePipeline):
             # Begin iteration with its group
             _, group_id = self.begin_iteration()
 
-            query = self.context.state.query
+            # Get pre-formatted query from state
+            query = self.context.state.formatted_query or ""
 
             # Observe → Evaluate → Route → Tools
             observe_output = await self.observe_agent(query, group_id=group_id)

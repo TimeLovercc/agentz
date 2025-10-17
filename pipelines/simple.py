@@ -61,8 +61,11 @@ class SimplePipeline(BasePipeline):
         # Start single iteration for structured logging
         _, group_id = self.begin_iteration(title="Single Pass")
         try:
+            # Get pre-formatted query from state
+            query_str = self.context.state.formatted_query or ""
+
             routing_input = RoutingInput(
-                query=self.context.state.query or "",
+                query=query_str,
                 gap="Route the query to the web_searcher_agent",
                 history=self.context.state.iteration_history(include_current=False) or "",
             )

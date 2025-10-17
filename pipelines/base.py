@@ -519,23 +519,34 @@ class BasePipeline:
     # Lifecycle Hook Methods (Override in Subclasses)
     # ============================================
 
+    def _update_state_runtime_defaults(self) -> None:
+        """Update state with runtime defaults if needed.
+
+        Override this method in subclasses to set up pipeline-specific state initialization.
+        """
+        pass
+
     async def initialize_pipeline(self, query: Any) -> None:
-        """Initialize pipeline state and format query.
+        """Initialize pipeline state and store query.
 
         Default implementation:
-        - Formats query via format_query()
-        - Sets state query
+        - Stores original query object in state
+        - Automatically formats and stores the query string
         - Updates printer status
+
+        The formatted query is accessible via self.state.formatted_query.
 
         Override this for custom initialization logic.
 
         Args:
             query: Input query (can be None)
         """
-        if query is not None:
-            formatted_query = self.format_query(query)
-            if self.state:
-                self.state.set_query(formatted_query)
+        self._update_state_runtime_defaults()
+        if query is not None and self.state:
+            # Store original query object
+            self.state.set_query(query)
+            # Automatically format and store the query string
+            self.state.formatted_query = self.format_query(query)
         self.update_printer("initialization", "Pipeline initialized", is_done=True)
 
     def format_query(self, query: Any) -> str:
@@ -605,6 +616,7 @@ class BasePipeline:
         if self.state:
             return self.state.final_report
         return result
+
 
     # ============================================
     # Abstract Execute Method (Must Implement in Subclasses)

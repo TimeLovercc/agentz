@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, ClassVar, Dict, List, Optional, Set, Tuple, Type
+from typing import Any, ClassVar, Dict, Iterable, List, Optional, Set, Tuple, Type
 from pydantic import BaseModel, Field, PrivateAttr, ValidationError, create_model
 from agentz.profiles.base import Profile, ToolAgentOutput
 
@@ -98,17 +98,53 @@ class ConversationState(BaseModel):
     started_at: Optional[float] = None
     complete: bool = False
     summary: Optional[str] = None
-    query: Optional[str] = None
+    query: Optional[Any] = None  # Store original query object
+    formatted_query: Optional[str] = None  # Store pre-formatted query string
 
     _iteration_model: Type[BaseIterationRecord] = PrivateAttr()
+    _runtime_context: Dict[str, str] = PrivateAttr(default_factory=dict)
 
     def start_timer(self) -> None:
         self.started_at = time.time()
 
-    def elapsed_minutes(self) -> float:
+    @property
+    def iteration(self) -> str:
+        """Current iteration index as string."""
+        try:
+            return str(self.current_iteration.index)
+        except (ValueError, AttributeError):
+            return '1'
+
+    @property
+    def history(self) -> str:
+        """Previous iteration history (excluding current)."""
+        return self.iteration_history(include_current=False) or 'No previous iterations.'
+
+    @property
+    def observation(self) -> str:
+        """Current iteration's observation."""
+        try:
+            obs = self.current_iteration.observation
+            return obs if obs else ''
+        except (ValueError, AttributeError):
+            return ''
+
+    @property
+    def last_summary(self) -> str:
+        """Last generated summary."""
+        return self.summary if self.summary else ''
+
+    @property
+    def conversation_history(self) -> str:
+        """Full conversation history (alias for iteration_history)."""
+        return self.iteration_history(include_current=True)
+
+    @property
+    def elapsed_minutes(self) -> str:
+        """Elapsed time in minutes as string."""
         if self.started_at is None:
-            return 0.0
-        return (time.time() - self.started_at) / 60
+            return '0'
+        return str((time.time() - self.started_at) / 60)
 
     def begin_iteration(self) -> BaseIterationRecord:
         iteration = self._iteration_model(index=len(self.iterations) + 1)
@@ -144,7 +180,8 @@ class ConversationState(BaseModel):
     def unsummarized_history(self, include_current: bool = True) -> str:
         return self.get_history_blocks(include_current, only_unsummarized=True)
 
-    def set_query(self, query: str) -> None:
+    def set_query(self, query: Any) -> None:
+        """Set the query - stores the original query object."""
         self.query = query
 
     def record_payload(self, payload: Any) -> BaseModel:

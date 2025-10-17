@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Callable, Optional
 
 from pydantic import BaseModel
@@ -187,62 +188,32 @@ class ContextAgent(Agent[TContext]):
         # Check if profile has runtime_template
         profile = getattr(self, '_profile', None)
         if profile and hasattr(profile, 'runtime_template') and profile.runtime_template:
-            # Build context dict with values from state for template rendering
+            # Extract placeholder names from runtime_template
+            template = profile.runtime_template
+            placeholders = set(re.findall(r'\{([a-z_]+)\}', template))
+
+            # Build context dict dynamically
             context_dict = {}
 
-            # iteration: current iteration number
-            try:
-                context_dict['iteration'] = str(self._pipeline.iteration)
-            except Exception:
-                try:
-                    context_dict['iteration'] = str(state.current_iteration.index)
-                except Exception:
-                    context_dict['iteration'] = '1'
+            # Get values for each placeholder
+            for placeholder in placeholders:
+                value = getattr(state, placeholder, None)
+                if value is not None:
+                    context_dict[placeholder] = str(value)
+                    continue
+                
+                context_dict[placeholder] = ''
 
-            # query: original query
-            if state.query:
-                context_dict['query'] = state.query
-            else:
-                context_dict['query'] = ''
-
-            # history: previous iteration history
-            try:
-                history = state.iteration_history(include_current=False)
-                context_dict['history'] = history if history else 'No previous iterations.'
-            except Exception:
-                context_dict['history'] = 'No previous iterations.'
-
-            # observation: current iteration observation (if available)
-            try:
-                observation = state.current_iteration.observation
-                if observation:
-                    context_dict['observation'] = observation
-                else:
-                    context_dict['observation'] = ''
-            except Exception:
-                context_dict['observation'] = ''
-
-            # input / task / gap: current payload (use same value for all these aliases)
-            if current_input:
-                context_dict['input'] = current_input
-                context_dict['task'] = current_input
-                context_dict['gap'] = current_input
-            else:
-                context_dict['input'] = ''
-                context_dict['task'] = ''
-                context_dict['gap'] = ''
-
-            # Extract fields from any BaseModel payload
+            # Extract BaseModel fields (only if template needs them)
             if payload is not None and isinstance(payload, BaseModel):
                 try:
                     payload_dict = payload.model_dump()
-                    # Add all fields to context_dict with lowercase keys
                     for field_name, field_value in payload_dict.items():
                         lowercased_key = field_name.lower()
-                        # Convert value to string for template rendering
-                        context_dict[lowercased_key] = str(field_value) if field_value is not None else ''
+                        # Only add if template actually needs this field
+                        if lowercased_key in placeholders:
+                            context_dict[lowercased_key] = str(field_value) if field_value is not None else ''
                 except Exception:
-                    # If extraction fails, silently skip - context_dict already has standard keys
                     pass
 
             # Render the runtime_template with context values
@@ -305,24 +276,19 @@ class ContextAgent(Agent[TContext]):
         # Build instructions with automatic context injection if enabled
         if self.auto_inject_context and self._pipeline is not None and hasattr(self._pipeline, 'context'):
             instructions = self.build_contextual_instructions(payload)
-            import ipdb
-            ipdb.set_trace()
         else:
-            # Build prompt with non-strict input coercion
-            # This allows string inputs to pass through without validation errors
-            validated = self._coerce_input(payload, strict=False)
-
-            if isinstance(validated, str):
-                instructions = validated
-            elif isinstance(validated, BaseModel):
-                instructions = validated.model_dump_json(indent=2)
-            elif isinstance(validated, dict):
+            # Build prompt without validation
+            if isinstance(payload, str):
+                instructions = payload
+            elif isinstance(payload, BaseModel):
+                instructions = payload.model_dump_json(indent=2)
+            elif isinstance(payload, dict):
                 import json
-                instructions = json.dumps(validated, indent=2)
-            elif validated is None and isinstance(self.instructions, str):
+                instructions = json.dumps(payload, indent=2)
+            elif payload is None and isinstance(self.instructions, str):
                 instructions = self.instructions
             else:
-                instructions = str(validated)
+                instructions = str(payload)
 
         # If pipeline context is available, use it for full tracking
         if self._pipeline is not None:
