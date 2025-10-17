@@ -1,20 +1,12 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from agentz.agent.base import ContextAgent
 from agentz.context.context import Context
 from pipelines.base import BasePipeline
-
-
-class WriterInput(BaseModel):
-    """Input schema for writer agent."""
-    user_prompt: str = Field(description="Original user query/prompt")
-    data_path: str = Field(description="Path to the dataset")
-    findings: str = Field(description="Research findings to synthesize")
-    guidelines_block: Optional[str] = Field(default="", description="Optional formatting guidelines")
 
 
 class DataScienceQuery(BaseModel):
@@ -29,7 +21,6 @@ class DataScienceQuery(BaseModel):
             f"Dataset path: {self.data_path}\n"
             "Provide a comprehensive data science workflow"
         )
-
 
 class DataScientistPipeline(BasePipeline):
     """Data science pipeline using manager-tool pattern.
@@ -100,26 +91,6 @@ class DataScientistPipeline(BasePipeline):
         final_group = self.begin_final_report()
         self.update_printer("research", "Research workflow complete", is_done=True)
 
-        # Prepare WriterInput with all required fields
-        # Extract user_prompt and data_path from original query or config
-        if isinstance(self.context.state.query, DataScienceQuery):
-            user_prompt = self.context.state.query.prompt
-            data_path = self.context.state.query.data_path
-        else:
-            # Fall back to config values if query is not DataScienceQuery
-            user_prompt = self.config.data.get('prompt', 'No prompt provided')
-            data_path = self.config.data.get('path', 'No data path provided')
-
-        findings = self.context.state.findings_text()
-        guidelines_block = ""  # Optional, can be populated from config if needed
-
-        writer_input = WriterInput(
-            user_prompt=user_prompt,
-            data_path=data_path,
-            findings=findings,
-            guidelines_block=guidelines_block
-        )
-
-        await self.writer_agent(writer_input, group_id=final_group)
+        await self.writer_agent(None, self.context.state.findings_text(), group_id=final_group)
 
         self.end_final_report(final_group)
