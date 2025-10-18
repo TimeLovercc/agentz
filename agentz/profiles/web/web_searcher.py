@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from agentz.profiles.base import Profile, ToolAgentOutput
 
-from agents import WebSearchTool
+# from agents import WebSearchTool
 
+from agentz.tools import web_search
 
 # Profile instance for web searcher agent
 web_searcher_profile = Profile(
@@ -28,8 +29,8 @@ GUIDELINES:
 
 Only output JSON. Follow the JSON schema below. Do not output anything else. I will be parsing this with Pydantic so output valid JSON only:
 {ToolAgentOutput.model_json_schema()}""",
-    runtime_template="{task}",
+    runtime_template="{query}",
     output_schema=ToolAgentOutput,
-    tools=[WebSearchTool()],
+    tools=[web_search],
     model=None
 )

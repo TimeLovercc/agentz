@@ -10,6 +10,10 @@ from .data_tools import (
     create_visualization,
 )
 
+from .web_tools import (
+    web_search
+)
+
 __all__ = [
     "load_dataset",
     "analyze_data",
@@ -17,4 +21,5 @@ __all__ = [
     "train_model",
     "evaluate_model",
     "create_visualization",
+    "web_search",
 ]
