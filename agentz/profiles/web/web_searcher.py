@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from agentz.profiles.base import Profile, ToolAgentOutput
-
-from agents import WebSearchTool
+from agentz.tools import search_google
 
 
 # Profile instance for web searcher agent
@@ -11,7 +10,7 @@ web_searcher_profile = Profile(
 
 OBJECTIVE:
 Given a search task with a query, follow these steps:
-- Use the web_search tool with the query provided in the task
+- Use the search_google tool with the query provided in the task
 - The tool will return web search results including titles, snippets, and URLs
 - Analyze the search results to extract relevant information
 - Write a 2-3 paragraph summary that synthesizes the key findings from the search results
@@ -30,6 +29,6 @@ Only output JSON. Follow the JSON schema below. Do not output anything else. I w
 {ToolAgentOutput.model_json_schema()}""",
     runtime_template="{task}",
     output_schema=ToolAgentOutput,
-    tools=[WebSearchTool()],
+    tools=[search_google],
     model=None
 )

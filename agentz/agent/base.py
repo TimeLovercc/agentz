@@ -192,16 +192,49 @@ class ContextAgent(Agent[TContext]):
             template = profile.runtime_template
             placeholders = set(re.findall(r'\{([a-z_]+)\}', template))
 
-            # Build context dict dynamically
+            # Build context dict dynamically with intelligent fallbacks
             context_dict = {}
 
             # Get values for each placeholder
             for placeholder in placeholders:
+                # Try state attribute first
                 value = getattr(state, placeholder, None)
                 if value is not None:
                     context_dict[placeholder] = str(value)
                     continue
-                
+
+                # Try runtime_context (pipeline-specific context)
+                runtime_ctx = getattr(state, '_runtime_context', None)
+                if runtime_ctx and placeholder in runtime_ctx:
+                    context_dict[placeholder] = str(runtime_ctx[placeholder])
+                    continue
+
+                # Apply intelligent fallbacks for common placeholders
+                if placeholder == 'findings' and hasattr(state, 'findings_text'):
+                    # Use findings_text() method for findings
+                    findings_text = state.findings_text()
+                    context_dict[placeholder] = findings_text if findings_text else 'No findings available yet.'
+                    continue
+
+                if placeholder == 'data_path':
+                    # Check pipeline config for data path
+                    if self._pipeline and hasattr(self._pipeline, 'config'):
+                        data_path = self._pipeline.config.data.get('path', 'N/A') if hasattr(self._pipeline.config, 'data') else 'N/A'
+                        context_dict[placeholder] = data_path
+                    else:
+                        context_dict[placeholder] = 'N/A'
+                    continue
+
+                if placeholder == 'user_prompt':
+                    # Check pipeline config for prompt or use state.query
+                    if self._pipeline and hasattr(self._pipeline, 'config'):
+                        user_prompt = self._pipeline.config.data.get('prompt', '') if hasattr(self._pipeline.config, 'data') else ''
+                        context_dict[placeholder] = user_prompt if user_prompt else (str(state.query) if state.query else '')
+                    else:
+                        context_dict[placeholder] = str(state.query) if state.query else ''
+                    continue
+
+                # Default: empty string for unknown placeholders
                 context_dict[placeholder] = ''
 
             # Extract BaseModel fields (only if template needs them)

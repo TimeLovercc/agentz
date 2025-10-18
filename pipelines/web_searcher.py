@@ -62,31 +62,27 @@ class WebSearcherPipeline(BasePipeline):
 
         # Iterative loop: observe → evaluate → plan → execute multiple searches
         while self.iteration < self.max_iterations and not self.context.state.complete:
-            # Begin iteration with its group
-            _, group_id = self.begin_iteration()
+            # Begin iteration - group_id managed automatically
+            self.begin_iteration()
 
             # Get pre-formatted query from state
             query = self.context.state.formatted_query or ""
 
             # Observe → Evaluate → Plan → Execute Multiple Tools
-            observe_output = await self.observe_agent(query, group_id=group_id)
-            evaluate_output = await self.evaluate_agent(observe_output, group_id=group_id)
+            observe_output = await self.observe_agent(query)
+            evaluate_output = await self.evaluate_agent(observe_output)
 
             if not self.context.state.complete:
-                planning_output = await self.planning_agent(self._serialize_output(evaluate_output), group_id=group_id)
-                await self._execute_tools(planning_output, self.tool_agents, group_id)
+                planning_output = await self.planning_agent(evaluate_output)
+                await self._execute_tools(planning_output, self.tool_agents)
 
-            # End iteration with its group
-            self.end_iteration(group_id)
+            # End iteration - group_id managed automatically
+            self.end_iteration()
 
-            if self.context.state.complete:
-                break
-
-        # Final report
-        final_group = self.begin_final_report()
+        # Final report - group_id managed automatically
+        self.begin_final_report()
         self.update_printer("research", "Web search workflow complete", is_done=True)
 
-        findings = self.context.state.findings_text()
-        await self.writer_agent(findings, group_id=final_group)
+        await self.writer_agent(self.context.state.findings_text())
 
-        self.end_final_report(final_group)
+        self.end_final_report()

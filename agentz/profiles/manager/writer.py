@@ -5,7 +5,7 @@ from agentz.profiles.base import Profile
 
 # Profile instance for writer agent
 writer_profile = Profile(
-    instructions="""You are a technical writing agent specialized in creating comprehensive data science reports.
+    instructions="""You are a technical writing agent specialized in creating comprehensive research and analysis reports.
 
 Your responsibilities:
 1. Synthesize findings from multiple research iterations
@@ -17,22 +17,27 @@ Your responsibilities:
 
 Report Structure Guidelines:
 - Start with a clear summary of the task/objective
-- Present methodology and approach
-- Include key findings and insights
-- Provide actionable recommendations
+- Present methodology and approach taken
+- Include key findings and insights discovered
+- Provide actionable recommendations based on findings
 - Use proper markdown formatting when appropriate
-- Include code examples when relevant
+- Include relevant examples, code snippets, references, or sources when applicable
 - Ensure technical accuracy while maintaining readability
+- Adapt format to the type of research (data analysis, web research, literature review, etc.)
 
 Focus on creating professional, comprehensive reports that effectively communicate the research findings and their practical implications.""",
-    runtime_template="""Provide a response based on the query and findings below with as much detail as possible{guidelines_block}
+    runtime_template="""Provide a comprehensive report based on the research query and findings below.
 
-QUERY: {user_prompt}
+ORIGINAL QUERY:
+{query}
 
-DATASET: {data_path}
+RESEARCH FINDINGS:
+{findings}
 
-FINDINGS:
-{findings}""",
+Additional context (if applicable):
+- Data source: {data_path}
+
+Create a detailed, well-structured report that addresses the original query based on the findings gathered.""",
     output_schema=None,
     tools=None,
     model=None

@@ -529,12 +529,47 @@ class BasePipeline:
         """
         pass
 
+    def _inject_pipeline_context(self) -> None:
+        """Inject pipeline-specific context into state._runtime_context.
+
+        This populates template placeholders with values from:
+        - Pipeline config (data_path, user_prompt, etc.)
+        - Available tool agents
+
+        Can be overridden in subclasses for custom context injection.
+        """
+        if not self.state:
+            return
+
+        context_dict = {}
+
+        # Add data path if available
+        if hasattr(self.config, 'data'):
+            data_path = self.config.data.get('path', None)
+            if data_path:
+                context_dict['data_path'] = data_path
+
+            # Add user prompt if available
+            user_prompt = self.config.data.get('prompt', None)
+            if user_prompt:
+                context_dict['user_prompt'] = user_prompt
+
+        # Add available agents list
+        if hasattr(self, 'tool_agents') and self.tool_agents:
+            agents_list = ', '.join(self.tool_agents.keys())
+            context_dict['available_agents'] = agents_list
+
+        # Update runtime context
+        if context_dict:
+            self.state.update_runtime_context(context_dict)
+
     async def initialize_pipeline(self, query: Any) -> None:
         """Initialize pipeline state and store query.
 
         Default implementation:
         - Stores original query object in state
         - Automatically formats and stores the query string
+        - Populates runtime_context with pipeline-specific values
         - Updates printer status
 
         The formatted query is accessible via self.state.formatted_query.
@@ -550,6 +585,11 @@ class BasePipeline:
             self.state.set_query(query)
             # Automatically format and store the query string
             self.state.formatted_query = self.format_query(query)
+
+        # Populate runtime_context with pipeline-specific values
+        if self.state:
+            self._inject_pipeline_context()
+
         self.update_printer("initialization", "Pipeline initialized", is_done=True)
 
     def format_query(self, query: Any) -> str:
