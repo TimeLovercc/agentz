@@ -268,7 +268,8 @@ class ContextAgent(Agent[TContext]):
 
         Args:
             payload: Input data for the agent
-            group_id: Optional group ID for tracking (used with pipeline context)
+            group_id: Optional group ID for tracking. If None, automatically uses
+                     pipeline's current group (_current_group_id) when available.
 
         Returns:
             Parsed output if in pipeline context, otherwise RunResult
@@ -292,10 +293,15 @@ class ContextAgent(Agent[TContext]):
 
         # If pipeline context is available, use it for full tracking
         if self._pipeline is not None:
+            # Auto-default group_id to pipeline's current group if not provided
+            effective_group_id = group_id
+            if effective_group_id is None and hasattr(self._pipeline, '_current_group_id'):
+                effective_group_id = self._pipeline._current_group_id
+
             result = await self._pipeline.agent_step(
                 agent=self,
                 instructions=instructions,
-                group_id=group_id,
+                group_id=effective_group_id,
             )
             # Extract final output for cleaner API
             output = result.final_output if hasattr(result, 'final_output') else result
