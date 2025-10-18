@@ -78,14 +78,11 @@ class DataScientistPipeline(BasePipeline):
             evaluate_output = await self.evaluate_agent(observe_output)
 
             if not self.context.state.complete:
-                routing_output = await self.routing_agent(self._serialize_output(evaluate_output))
+                routing_output = await self.routing_agent(evaluate_output)
                 await self._execute_tools(routing_output, self.tool_agents)
 
             # End iteration - group_id managed automatically
             self.end_iteration()
-
-            if self.context.state.complete:
-                break
 
         # Final report - group_id managed automatically
         self.begin_final_report()
